@@ -12,7 +12,7 @@ import { clearAccessToken, clearRefreshToken, setAccessToken, setRefreshToken } 
 import { transporter } from '../../utils/mailer/mailer';
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '60s';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '2h';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
@@ -20,7 +20,7 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 // User Register 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, firstName, lastName } = req.body;
+    const { email, password, firstName, lastName, role } = req.body;
 
     // Validate input
     if (!email || !password || !firstName || !lastName) {
@@ -50,7 +50,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         passwordHash,
         firstName: firstName,
         lastName: lastName,
-        role: UserRole.USER,
+        role: role ?? UserRole.USER,
       },
       select: {
         id: true,
@@ -76,7 +76,6 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       HttpStatus.CREATED
     );
   } catch (error: any) {
-    console.error('Registration error:', error);
 
     if (error?.code === 'P2002') {
       sendError(res, 'User with this email already exists', HttpStatus.BAD_REQUEST);
@@ -125,31 +124,24 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         role: true
       },
     });
-    console.log('user', user)
     if (!user) {
       sendError(res, 'Invalid email or password', HttpStatus.UNAUTHORIZED);
       return;
     }
 
     if (user.isInactive) {
-      sendError(res, 'Your account is inactive. Contact support.', HttpStatus.FORBIDDEN);
+      sendError(res, 'Your account is inactive. Contact to support team.', HttpStatus.FORBIDDEN);
       return
     }
 
-    // Verify password
-    console.log('HEllo');
-
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    console.log('HEllo2');
 
     if (!isPasswordValid) {
       sendError(res, 'Invalid email or password', HttpStatus.UNAUTHORIZED);
       return;
     }
-    console.log('HEllo3');
 
     if (!JWT_SECRET || !REFRESH_TOKEN_SECRET) {
-      console.error('JWT secrets are not configured');
       sendError(res, 'Server configuration error', HttpStatus.INTERNAL_SERVER_ERROR);
       return;
     }
@@ -172,13 +164,10 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     setAccessToken(res, accessToken);
     setRefreshToken(res, refreshToken);
 
-    console.log("REQ:req.cookies" , req.cookie)
-
     await prisma.user.update({
       where: { id: user.id },
       data: { refreshToken },
     });
-    console.log('Successfulyy!!!');
 
     sendSuccess(
       res,
@@ -190,12 +179,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
           lastName: user.lastName,
           role: user.role
         },
-        accessToken
+        token: {
+          accessToken,
+          refreshToken
+        }
       },
       'Login successful'
     );
   } catch (error: any) {
-    console.error('Login error:', error);
 
     // Provide more specific error messages
     if (error?.code === 'ECONNREFUSED' || error?.code === 'P1001') {
@@ -219,9 +210,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
     // Get refresh token from body or cookie
-    const token = req.cookies.refreshToken;
-    console.log('token', token)
-    console.log('req.cookies', req.cookies)
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      sendError(res, "Unauthorized", HttpStatus.UNAUTHORIZED);
+      return;
+    }
+    const removeBearer = authHeader.split(" ")[1];
+    const token = req.cookies.refreshToken || removeBearer;
+
     if (!token) {
       sendError(res, 'Unauthorized', HttpStatus.UNAUTHORIZED);
       return;
@@ -230,6 +227,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     if (!JWT_SECRET || !REFRESH_TOKEN_SECRET) {
       throw new Error('JWT secrets are not configured');
     }
+
 
     // Verify refresh token
     let payload: JWTPayload;
@@ -260,9 +258,10 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
     );
 
+
     setAccessToken(res, newAccessToken);
 
-    // Send new tokens
+    // Send new tokens (include accessToken in response for frontend to update session)
     sendSuccess(
       res,
       {
@@ -271,12 +270,12 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
           email: user.email,
           role: user.role,
         },
+        accessToken: newAccessToken, // Return access token in response
       },
       'Token refreshed successfully'
     );
 
   } catch (error: any) {
-    console.error('Refresh token error:', error);
     sendError(
       res,
       error?.message || 'Failed to refresh token',
@@ -333,13 +332,15 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     await transporter.sendMail(mailOptions);
     sendSuccess(res, null, 'Password reset email sent');
+    return;
   } catch (error) {
-    console.error(error);
     sendError(res, 'Failed to send password reset email', 500);
+    return;
   }
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
+
   const { hash, password } = req.body;
 
   if (!hash || !password) {
@@ -382,60 +383,6 @@ export const resetPassword = async (req: Request, res: Response) => {
   sendSuccess(res, null, 'Password has been reset successfully');
 };
 
-// User Profile get
-export const getProfile = async (req: Request, res: Response): Promise<void> => {
-  try {
-    if (!req.user) {
-      sendError(res, 'User not authenticated', HttpStatus.UNAUTHORIZED);
-      return;
-    }
-
-    // Get user profile using Prisma
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        createdAt: true,
-      },
-    });
-
-    if (!user) {
-      sendError(res, 'User not found', HttpStatus.NOT_FOUND);
-      return;
-    }
-
-    sendSuccess(
-      res,
-      {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        created_at: user.createdAt,
-      },
-      'Profile retrieved successfully'
-    );
-  } catch (error: any) {
-    console.error('Get profile error:', error);
-
-    // Provide more specific error messages
-    if (error?.code === 'ECONNREFUSED' || error?.code === 'P1001') {
-      sendError(
-        res,
-        'Database connection failed. Please check your database configuration and ensure PostgreSQL is running.',
-        HttpStatus.SERVICE_UNAVAILABLE
-      );
-      return;
-    }
-
-    sendError(
-      res,
-      error?.message || 'Failed to get profile',
-      HttpStatus.INTERNAL_SERVER_ERROR
-    );
-  }
-};
 
 //Logout User
 export const logout = async (req: Request, res: Response): Promise<void> => {
@@ -456,7 +403,6 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
 
     sendSuccess(res, null, 'Logged out successfully', HttpStatus.OK);
   } catch (error) {
-    console.error('Logout error:', error);
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       status: 'error',
       message: 'Failed to logout',

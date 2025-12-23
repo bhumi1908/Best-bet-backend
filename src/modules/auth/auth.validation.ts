@@ -25,6 +25,12 @@ export const registerSchema = Joi.object({
     'string.max': 'Last name must not exceed 50 characters',
     'any.required': 'Last name is required',
   }),
+  role: Joi.string()
+    .valid("USER", "ADMIN")
+    .optional()
+    .messages({
+      "any.only": "Role must be either USER or ADMIN",
+    }),
 });
 
 // Login user Validation
@@ -41,7 +47,7 @@ export const loginSchema = Joi.object({
 
 // Forgot password validation
 export const forgotPassSchema = Joi.object({
- email: Joi.string().email().required().messages({
+  email: Joi.string().email().required().messages({
     'string.email': 'Please provide a valid email address',
     'any.required': 'Email is required',
   }),

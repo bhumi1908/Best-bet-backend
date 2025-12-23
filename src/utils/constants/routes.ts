@@ -7,6 +7,11 @@ export const API_ROUTES = {
     FORGOTPASS: '/api/auth/forgot-password',
     RESETPASS: '/api/auth/reset-password'
   },
+  USER: {
+    BASE: '/api/users',
+    GET_ALL: '/api/users',
+    UPDATE: '/api/users/:id',
+  },
   UPLOAD: {
     BASE: '/api/upload',
     SINGLE: '/api/upload',

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, getProfile, refreshToken, forgotPassword, resetPassword, logout } from './auth.controller';
+import { register, login, refreshToken, forgotPassword, resetPassword, logout } from './auth.controller';
 import { validateDto } from '../../middleware/validateDto';
 import { registerSchema, loginSchema, forgotPassSchema, resetPasswordSchema } from './auth.validation';
 import { authenticateToken } from '../../middleware/auth';
@@ -20,13 +20,6 @@ router.post(
   authRateLimiter,
   validateDto(loginSchema),
   login
-);
-
-// Protected routes
-router.get(
-  '/profile',
-  authenticateToken,
-  getProfile
 );
 
 //Refresh token routes

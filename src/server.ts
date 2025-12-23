@@ -5,6 +5,7 @@ import cors, { CorsOptions } from 'cors';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 import authRoutes from './modules/auth/auth.routes';
+import userRoutes from './modules/user/user.routes';
 import { API_ROUTES } from './utils/constants/routes';
 
 // Load environment variables
@@ -39,6 +40,7 @@ app.use(rateLimiter);
 app.use(cookieParser());
 // API Routes
 app.use(API_ROUTES.AUTH.BASE, authRoutes);
+app.use(API_ROUTES.USER.BASE, userRoutes);
 
 // 404 handler
 app.use((req, res) => {

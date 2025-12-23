@@ -57,7 +57,7 @@ Before you begin, ensure you have the following installed:
 
    # JWT Configuration
    JWT_SECRET=your_super_secret_jwt_key_change_this_in_production
-   JWT_EXPIRES_IN=7d
+   JWT_EXPIRES_IN=2h
 
    # Cloudinary Configuration
    CLOUDINARY_CLOUD_NAME=your_cloud_name

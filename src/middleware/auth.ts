@@ -41,7 +41,6 @@ export const authenticateToken = async (
       console.log('🔑 Using token from header');
 
     }
-
     if (!token) {
       console.log('❌ No token found - returning 401');
 
@@ -58,8 +57,6 @@ export const authenticateToken = async (
     }
     try {
       const decoded = jwt.verify(token, jwtSecret) as JWTPayload;
-      console.log('✅ Token valid, user:', decoded.email);
-
 
       // Verify user still exists in database using Prisma
       const user = await prisma.user.findUnique({
