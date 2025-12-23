@@ -1,0 +1,465 @@
+import fs from 'fs';
+import path from 'path';
+import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import prisma from '../../config/prisma';
+import { sendSuccess, sendError } from '../../utils/helpers/response';
+import { HttpStatus, UserRole } from '../../utils/constants/enums';
+import { JWTPayload } from '../../middleware/auth';
+import crypto from 'crypto';
+import { clearAccessToken, clearRefreshToken, setAccessToken, setRefreshToken } from '../../utils/helpers';
+import { transporter } from '../../utils/mailer/mailer';
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '60s';
+const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
+const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
+
+
+// User Register 
+export const register = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, password, firstName, lastName } = req.body;
+
+    // Validate input
+    if (!email || !password || !firstName || !lastName) {
+      sendError(res, 'Email and password are required', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+
+    if (existingUser) {
+      sendError(res, 'User with this email already exists', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    // Create user using Prisma
+    const user = await prisma.user.create({
+      data: {
+        email,
+        passwordHash,
+        firstName: firstName,
+        lastName: lastName,
+        role: UserRole.USER,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+      },
+    });
+
+    sendSuccess(
+      res,
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role,
+        },
+      },
+      'User registered successfully',
+      HttpStatus.CREATED
+    );
+  } catch (error: any) {
+    console.error('Registration error:', error);
+
+    if (error?.code === 'P2002') {
+      sendError(res, 'User with this email already exists', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    // Provide more specific error messages
+    if (error?.code === 'ECONNREFUSED' || error?.code === 'P1001') {
+      sendError(
+        res,
+        'Database connection failed. Please check your database configuration and ensure PostgreSQL is running.',
+        HttpStatus.SERVICE_UNAVAILABLE
+      );
+      return;
+    }
+
+    sendError(
+      res,
+      error?.message || 'Failed to register user',
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
+  }
+};
+
+// User Login
+export const login = async (req: Request, res: Response): Promise<void> => {
+  try {
+
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      sendError(res, 'Email and password are required', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    // Find user by email using Prisma
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        firstName: true,
+        lastName: true,
+        isInactive: true,
+        role: true
+      },
+    });
+    console.log('user', user)
+    if (!user) {
+      sendError(res, 'Invalid email or password', HttpStatus.UNAUTHORIZED);
+      return;
+    }
+
+    if (user.isInactive) {
+      sendError(res, 'Your account is inactive. Contact support.', HttpStatus.FORBIDDEN);
+      return
+    }
+
+    // Verify password
+    console.log('HEllo');
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    console.log('HEllo2');
+
+    if (!isPasswordValid) {
+      sendError(res, 'Invalid email or password', HttpStatus.UNAUTHORIZED);
+      return;
+    }
+    console.log('HEllo3');
+
+    if (!JWT_SECRET || !REFRESH_TOKEN_SECRET) {
+      console.error('JWT secrets are not configured');
+      sendError(res, 'Server configuration error', HttpStatus.INTERNAL_SERVER_ERROR);
+      return;
+    }
+
+    // Generate Access Token (short-lived)
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, role: user.role } as JWTPayload,
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
+    );
+
+    // Generate Refresh Token (long-lived, secure random string)
+    const refreshToken = jwt.sign(
+      { id: user.id, email: user.email, role: user.role } as JWTPayload,
+      REFRESH_TOKEN_SECRET,
+      { expiresIn: REFRESH_TOKEN_EXPIRES_IN } as jwt.SignOptions
+    );
+
+    // Set cookies
+    setAccessToken(res, accessToken);
+    setRefreshToken(res, refreshToken);
+
+    console.log("REQ:req.cookies" , req.cookie)
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken },
+    });
+    console.log('Successfulyy!!!');
+
+    sendSuccess(
+      res,
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role
+        },
+        accessToken
+      },
+      'Login successful'
+    );
+  } catch (error: any) {
+    console.error('Login error:', error);
+
+    // Provide more specific error messages
+    if (error?.code === 'ECONNREFUSED' || error?.code === 'P1001') {
+      sendError(
+        res,
+        'Database connection failed. Please check your database configuration and ensure PostgreSQL is running.',
+        HttpStatus.SERVICE_UNAVAILABLE
+      );
+      return;
+    }
+
+    sendError(
+      res,
+      error?.message || 'Failed to login',
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
+  }
+};
+
+//Refresh Token
+export const refreshToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Get refresh token from body or cookie
+    const token = req.cookies.refreshToken;
+    console.log('token', token)
+    console.log('req.cookies', req.cookies)
+    if (!token) {
+      sendError(res, 'Unauthorized', HttpStatus.UNAUTHORIZED);
+      return;
+    }
+
+    if (!JWT_SECRET || !REFRESH_TOKEN_SECRET) {
+      throw new Error('JWT secrets are not configured');
+    }
+
+    // Verify refresh token
+    let payload: JWTPayload;
+    try {
+      payload = jwt.verify(token, REFRESH_TOKEN_SECRET) as unknown as JWTPayload;
+    } catch (err) {
+      sendError(res, 'Invalid or expired refresh token', HttpStatus.FORBIDDEN);
+      return;
+
+    }
+
+    // Check if refresh token exists in DB
+    const user = await prisma.user.findUnique({
+      where: { id: payload.id },
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, refreshToken: true },
+    });
+
+    if (!user || user.refreshToken !== token) {
+      sendError(res, 'Refresh token not found or revoked', HttpStatus.FORBIDDEN);
+      return;
+
+    }
+
+    // Generate new access token
+    const newAccessToken = jwt.sign(
+      { id: user.id, email: user.email, role: user.role } as JWTPayload,
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
+    );
+
+    setAccessToken(res, newAccessToken);
+
+    // Send new tokens
+    sendSuccess(
+      res,
+      {
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+        },
+      },
+      'Token refreshed successfully'
+    );
+
+  } catch (error: any) {
+    console.error('Refresh token error:', error);
+    sendError(
+      res,
+      error?.message || 'Failed to refresh token',
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      sendError(res, 'Email not found', HttpStatus.NOT_FOUND);
+      return;
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}&id=${user.id}`;
+
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const hashedToken = await bcrypt.hash(resetToken, 10);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        forgotHashKey: hashedToken,
+        forgotHashExpiresAt: expiresAt,
+      },
+    });
+
+    // Read HTML template from external file
+    const templatePath = path.join(process.cwd(), 'src/templates/emails', 'forgot-password.html');
+    let emailHtml = fs.readFileSync(templatePath, 'utf-8');
+
+    // Replace placeholders with actual values
+    emailHtml = emailHtml
+      .replace('{{name}}', `${user.firstName} ${user.lastName}`)
+      .replace('{{resetUrl}}', resetUrl)
+      .replace(/\$\{firstName\}/g, user.firstName || 'there')
+      .replace(/\$\{resetLink\}/g, resetUrl)
+      .replace(/\$\{expiryTime\}/g, '15 minutes')
+
+
+    // Email content
+    const mailOptions = {
+      from: `"${process.env.EMAIL_USER}" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "Reset Your Password",
+      text: `Hello ${user.firstName + ' ' + user.lastName},\n\nClick the link below to reset your password. This link will expire in 15 minutes.\n\n${resetUrl}`,
+      html: emailHtml,
+    };
+
+    await transporter.sendMail(mailOptions);
+    sendSuccess(res, null, 'Password reset email sent');
+  } catch (error) {
+    console.error(error);
+    sendError(res, 'Failed to send password reset email', 500);
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  const { hash, password } = req.body;
+
+  if (!hash || !password) {
+    sendError(
+      res,
+      'Reset token and password are required',
+      HttpStatus.BAD_REQUEST
+    );
+    return;
+  }
+
+  const user = await prisma.user.findFirst({
+    where: {
+      forgotHashExpiresAt: { gte: new Date() }, // Not expired
+    },
+  });
+
+  if (!user) {
+    sendError(res, 'The password reset link is invalid or has expired. Please request a new one.', HttpStatus.BAD_REQUEST);
+    return;
+  }
+
+  const isValid = user.forgotHashKey && await bcrypt.compare(hash, user.forgotHashKey);
+  if (!isValid) {
+    sendError(res, 'The password reset link is invalid or has expired. Please request a new one.', HttpStatus.BAD_REQUEST);
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      passwordHash,
+      forgotHashKey: null,
+      forgotHashExpiresAt: null,
+    },
+  });
+
+  sendSuccess(res, null, 'Password has been reset successfully');
+};
+
+// User Profile get
+export const getProfile = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      sendError(res, 'User not authenticated', HttpStatus.UNAUTHORIZED);
+      return;
+    }
+
+    // Get user profile using Prisma
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      sendError(res, 'User not found', HttpStatus.NOT_FOUND);
+      return;
+    }
+
+    sendSuccess(
+      res,
+      {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        created_at: user.createdAt,
+      },
+      'Profile retrieved successfully'
+    );
+  } catch (error: any) {
+    console.error('Get profile error:', error);
+
+    // Provide more specific error messages
+    if (error?.code === 'ECONNREFUSED' || error?.code === 'P1001') {
+      sendError(
+        res,
+        'Database connection failed. Please check your database configuration and ensure PostgreSQL is running.',
+        HttpStatus.SERVICE_UNAVAILABLE
+      );
+      return;
+    }
+
+    sendError(
+      res,
+      error?.message || 'Failed to get profile',
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
+  }
+};
+
+//Logout User
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+
+    if (userId) {
+      // Optional: Clear refresh token from database if you store it
+      await prisma.user.update({
+        where: { id: userId },
+        data: { refreshToken: null },
+      });
+    }
+
+    // Clear refresh token cookie
+    clearRefreshToken(res);
+    clearAccessToken(res)
+
+    sendSuccess(res, null, 'Logged out successfully', HttpStatus.OK);
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      status: 'error',
+      message: 'Failed to logout',
+    });
+  }
+};

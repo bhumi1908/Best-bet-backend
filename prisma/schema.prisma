@@ -1,0 +1,67 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  firstName     String? @map("first_name")
+  lastName     String? @map("last_name")
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         Role    @default(USER)
+  refreshToken String?   @map("refresh_token")
+  isInactive    Boolean   @default(false) @map("is_inactive")
+  forgotHashKey      String?   @unique
+  forgotHashExpiresAt DateTime?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  uploads      Upload[]
+
+  @@map("users")
+}
+
+model SubscriptionPlan {
+  id          Int      @id @default(autoincrement())
+  title        String   @unique
+  price       Float
+  period      String   
+  features    String[] 
+  isPopular   Boolean  @default(false)
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("subscription_plans")
+}
+
+model Upload {
+  id                  Int       @id @default(autoincrement())
+  userId              Int       @map("user_id")
+  cloudinaryPublicId  String    @map("cloudinary_public_id")
+  cloudinaryUrl       String    @map("cloudinary_url")
+  cloudinarySecureUrl String    @map("cloudinary_secure_url")
+  resourceType        String?   @map("resource_type")
+  format              String?
+  width               Int?
+  height              Int?
+  bytes               Int?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("uploads")
+}
