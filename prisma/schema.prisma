@@ -65,3 +65,19 @@ model Upload {
 
   @@map("uploads")
 }
+
+
+model Support {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  subject   String
+  category  String
+  priority  String
+  message   String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("supports")
+}

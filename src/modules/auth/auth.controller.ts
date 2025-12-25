@@ -320,7 +320,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
       .replace(/\$\{resetLink\}/g, resetUrl)
       .replace(/\$\{expiryTime\}/g, '15 minutes')
 
-
     // Email content
     const mailOptions = {
       from: `"${process.env.EMAIL_USER}" <${process.env.EMAIL_USER}>`,
@@ -328,6 +327,23 @@ export const forgotPassword = async (req: Request, res: Response) => {
       subject: "Reset Your Password",
       text: `Hello ${user.firstName + ' ' + user.lastName},\n\nClick the link below to reset your password. This link will expire in 15 minutes.\n\n${resetUrl}`,
       html: emailHtml,
+      attachments: [
+        {
+          filename: 'lock.png',
+          path: path.join(process.cwd(), '/public/assests/lock-image.png'),
+          cid: 'lockIcon'
+        },
+        {
+          filename: 'info.png',
+          path: path.join(process.cwd(), '/public/assests/Info-image.png'),
+          cid: 'InfoIcon'
+        },
+        {
+          filename: 'shield.png',
+          path: path.join(process.cwd(), '/public/assests/shield-image.png'),
+          cid: 'ShieldIcon'
+        }
+      ]
     };
 
     await transporter.sendMail(mailOptions);
