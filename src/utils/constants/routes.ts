@@ -19,6 +19,10 @@ export const API_ROUTES = {
   PROFILE: {
     ADMINBASE: '/api/admin/profile'
   },
+  SUBSCRIPTIONPLAN:{
+    ADMINBASE: '/api/admin/subscription-plan',
+    BASE: '/api/subscription-plan'
+  },
   UPLOAD: {
     BASE: '/api/upload',
     SINGLE: '/api/upload',

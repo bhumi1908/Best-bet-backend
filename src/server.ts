@@ -8,6 +8,7 @@ import authRoutes from './modules/auth/auth.routes';
 import userRoutes from './modules/user/user.routes';
 import supportRoutes from './modules/support/support.routes';
 import profileRoutes from './modules/profile/profile.routes';
+import subscriptionPlanRoutes from './modules/subscription-plans/subscription-plan.routes';
 import { API_ROUTES } from './utils/constants/routes';
 
 // Load environment variables
@@ -45,6 +46,7 @@ app.use(API_ROUTES.AUTH.BASE, authRoutes);
 app.use(API_ROUTES.USER.BASE, userRoutes);
 app.use(API_ROUTES.SUPPORT.BASE, supportRoutes);
 app.use(API_ROUTES.PROFILE.ADMINBASE, profileRoutes);
+app.use(API_ROUTES.SUBSCRIPTIONPLAN.BASE, subscriptionPlanRoutes);
 
 // 404 handler
 app.use((req, res) => {
