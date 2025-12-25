@@ -15,6 +15,19 @@ enum Role {
   ADMIN
 }
 
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
 model User {
   id           Int       @id @default(autoincrement())
   firstName     String? @map("first_name")
@@ -29,23 +42,13 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  uploads      Upload[]
+   uploads               Upload[]
+  subscriptions         UserSubscription[]
+  payments              Payment[]
+  refunds               Refund[]
+  
 
   @@map("users")
-}
-
-model SubscriptionPlan {
-  id          Int      @id @default(autoincrement())
-  title        String   @unique
-  price       Float
-  period      String   
-  features    String[] 
-  isPopular   Boolean  @default(false)
-
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-
-  @@map("subscription_plans")
 }
 
 model Upload {
@@ -64,4 +67,118 @@ model Upload {
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("uploads")
+}
+
+model Support {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  subject   String
+  category  String
+  priority  String
+  message   String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+    @@map("supports")
+}
+
+model SubscriptionPlan {
+  id            Int       @id @default(autoincrement()) 
+  name          String    @unique
+  price         Float
+  duration      Int      // Month
+  description   String?
+  isRecommended Boolean   @default(false)
+
+  features      Feature[]
+  subscriptions UserSubscription[]
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+   isDeleted     Boolean   @default(false)
+  deletedAt     DateTime?
+
+  @@map("subscription_plans")
+}
+
+model Feature {
+  id        Int       @id @default(autoincrement()) 
+  planId    Int      
+  name      String
+  description String?
+
+  plan      SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+   isDeleted     Boolean   @default(false)
+  deletedAt     DateTime?
+
+  @@map("features")
+}
+
+model UserSubscription {
+  id                     Int      @id @default(autoincrement())
+  userId                 Int     
+  planId                 Int     
+  startDate              DateTime @map("start_date")
+  endDate                DateTime @map("end_date")
+  stripeSubscriptionId   String?   @unique
+  paymentId              Int?     
+
+  user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   SubscriptionPlan @relation(fields: [planId], references: [id])
+  payment                Payment?         @relation(fields: [paymentId], references: [id])
+
+    createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+   isDeleted     Boolean   @default(false)
+  deletedAt     DateTime?
+
+  @@map("user_subscriptions")
+}
+
+model Payment {
+  id               Int           @id @default(autoincrement())
+  userId           Int          
+  amount           Float
+  status           PaymentStatus
+  stripePaymentId  String        @unique
+
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription     UserSubscription[]
+  refund           Refund?
+
+    createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+   isDeleted     Boolean   @default(false)
+  deletedAt     DateTime?
+
+  @@map("payments")
+}
+
+model Refund {
+  id              Int           @id @default(autoincrement()) 
+  paymentId       Int           @unique 
+  userId          Int           
+  amount          Float
+  status          RefundStatus
+  stripeRefundId  String        @unique
+
+  payment         Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+   isDeleted     Boolean   @default(false)
+  deletedAt     DateTime?
+
+  @@map("refunds")
 }
