@@ -91,6 +91,7 @@ model SubscriptionPlan {
   duration      Int      // Month
   description   String?
   isRecommended Boolean   @default(false)
+  isActive      Boolean   @default(true) @map("is_active")
 
   features      Feature[]
   subscriptions UserSubscription[]
@@ -103,6 +104,27 @@ model SubscriptionPlan {
 
   @@map("subscription_plans")
 }
+
+model StripeSubscriptionPlan {
+  id                 Int      @id @default(autoincrement())
+
+  subscriptionPlanId Int      @unique
+  stripeProductId    String   @unique
+  stripePriceId      String   @unique
+
+  currency           String   @default("usd")
+  isActive           Boolean  @default(true)
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  subscriptionPlan   SubscriptionPlan 
+    @relation(fields: [subscriptionPlanId], references: [id], onDelete: Cascade)
+
+  @@map("stripe_subscription_plans")
+}
+
+
 
 model Feature {
   id        Int       @id @default(autoincrement()) 

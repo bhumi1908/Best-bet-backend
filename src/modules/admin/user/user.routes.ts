@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { getAllUsers, getUserById, updateUser } from './user.controller';
-import { authenticateToken } from '../../middleware/auth';
-import { requireAdmin } from '../../middleware/adminAuth';
-import { validateDto, validateQuery } from '../../middleware/validateDto';
+import { validateDto, validateQuery } from "../../../middleware/validateDto";
+import { authenticateToken } from "../../../middleware/auth";
+import { requireAdmin } from "../../../middleware/adminAuth";
 import { updateUserSchema, getUsersQuerySchema } from './user.validation';
 
 const router = Router();
