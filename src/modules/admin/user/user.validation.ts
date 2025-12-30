@@ -1,5 +1,5 @@
 import Joi from 'joi';
-import { UserRole } from '../../utils/constants/enums';
+import { UserRole } from '../../../utils/constants/enums';
 
 // Update user Validation
 export const updateUserSchema = Joi.object({

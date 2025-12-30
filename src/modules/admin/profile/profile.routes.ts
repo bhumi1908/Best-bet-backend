@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { authRateLimiter } from "../../middleware/rateLimiter";
-import { validateDto } from "../../middleware/validateDto";
-import { authenticateToken } from "../../middleware/auth";
-import { requireAdmin } from "../../middleware/adminAuth";
+import { authRateLimiter } from "../../../middleware/rateLimiter";
+import { validateDto } from "../../../middleware/validateDto";
+import { authenticateToken } from "../../../middleware/auth";
+import { requireAdmin } from "../../../middleware/adminAuth";
 import { changeAdminPassword, editAdminProfileDetail } from "./profile.controller";
 import { changePasswordSchema } from "./profile.validation";
 

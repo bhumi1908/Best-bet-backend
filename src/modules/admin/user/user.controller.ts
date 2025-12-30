@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import prisma from '../../config/prisma';
-import { sendSuccess, sendError } from '../../utils/helpers/response';
-import { HttpStatus, UserRole } from '../../utils/constants/enums';
+import prisma from '../../../config/prisma';
+import { sendSuccess, sendError } from '../../../utils/helpers/response';
+import { HttpStatus, UserRole } from '../../../utils/constants/enums';
 
 // Get All Users
 export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
