@@ -23,11 +23,18 @@ export const API_ROUTES = {
     ADMINBASE: '/api/admin/subscription-plan',
     BASE: '/api/subscription-plan'
   },
+  SUBSCRIPTION: {
+    BASE: '/api/subscription'
+  },
   UPLOAD: {
     BASE: '/api/upload',
     SINGLE: '/api/upload',
     MULTIPLE: '/api/upload/multiple',
   },
+  STRIPE: {
+    BASE: '/api/stripe'
+  },
   HEALTH: '/healthcheck',
+  WEBHOOK: '/webhook'
 } as const;
 

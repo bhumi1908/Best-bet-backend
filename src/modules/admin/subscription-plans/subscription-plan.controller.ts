@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import HttpStatus from "http-status-codes";
 import prisma from "../../../config/prisma";
 import { sendError, sendSuccess } from "../../../utils/helpers";
+import stripe from "../../../config/stripe";
 
 // Get All plan Admin
 export const getAllPlansAdmin = async (req: Request, res: Response) => {
@@ -115,6 +116,8 @@ export const getPlanByIdAdmin = async (req: Request, res: Response) => {
 
 // CREATE SUBSCRIPTION PLAN
 export const createPlan = async (req: Request, res: Response) => {
+  let stripeProductId: string | null = null;
+  let stripePriceId: string | null = null;
   try {
     const {
       name,
@@ -138,6 +141,29 @@ export const createPlan = async (req: Request, res: Response) => {
       );
     }
 
+    const product = await stripe.products.create({
+      name,
+      description: description || "",
+      active: isActive,
+    });
+    stripeProductId = product.id
+
+    console.log('product', product)
+
+    const stripePrice = await stripe.prices.create({
+      product: product.id,
+      unit_amount: Math.round(price * 100),
+      currency: "usd",
+      recurring: {
+        interval: "month",
+        interval_count: duration,
+      },
+      active: isActive,
+    });
+    stripePriceId = stripePrice.id
+
+    console.log('stripePrice', stripePrice)
+
     const plan = await prisma.subscriptionPlan.create({
       data: {
         name,
@@ -146,6 +172,10 @@ export const createPlan = async (req: Request, res: Response) => {
         description,
         isRecommended,
         isActive,
+
+        stripeProductId: product.id,
+        stripePriceId: stripePrice.id,
+
         features: {
           create: features.map((f: any) => ({
             name: f.name,
@@ -175,19 +205,56 @@ export const createPlan = async (req: Request, res: Response) => {
     );
   } catch (error: any) {
     console.error("Create plan error:", error);
-    sendError(
+
+    try {
+      if (stripeProductId) {
+        //  Deactivate all prices
+        const prices = await stripe.prices.list({
+          product: stripeProductId,
+          limit: 100,
+        });
+
+        for (const price of prices.data) {
+          if (price.active) {
+            await stripe.prices.update(price.id, { active: false });
+          }
+        }
+
+        // Deactivate product
+        await stripe.products.update(stripeProductId, {
+          active: false,
+          metadata: {
+            orphaned: "true",
+            rollback_reason: "db_failed",
+          },
+        });
+
+        console.log(
+          `Stripe rollback completed for product ${stripeProductId}`
+        );
+      }
+    } catch (stripeError) {
+      console.error("Stripe rollback failed:", stripeError);
+    }
+
+    return sendError(
       res,
       error?.message || "Failed to create subscription plan",
       HttpStatus.INTERNAL_SERVER_ERROR
     );
   }
+
 };
 
 //  UPDATE SUBSCRIPTION PLAN
 export const updatePlan = async (req: Request, res: Response) => {
+
+  let stripePriceId: string | null = null;
+  let stripeProductId: string | null = null;
+  let newStripePriceCreated = false;
+
   try {
     const planId = Number(req.params.id);
-
     if (isNaN(planId)) {
       return sendError(res, "Invalid subscription plan ID", HttpStatus.BAD_REQUEST);
     }
@@ -199,25 +266,118 @@ export const updatePlan = async (req: Request, res: Response) => {
       description,
       isRecommended,
       isActive,
+      features = []
     } = req.body;
 
+
     const plan = await prisma.subscriptionPlan.findFirst({
-      where: { id: planId, isDeleted: false },
+      where: { id: planId }
     });
 
-    if (!plan) {
+    if (!plan || plan.isDeleted) {
       return sendError(res, "Subscription plan not found", HttpStatus.NOT_FOUND);
     }
 
-    const updatedPlan = await prisma.subscriptionPlan.update({
-      where: { id: planId },
-      data: {
+    const existingNameConflict = await prisma.subscriptionPlan.findFirst({
+      where: {
         name,
-        price,
-        duration,
-        description,
-        isRecommended,
-        isActive,
+        isDeleted: false,
+        NOT: { id: planId },
+      },
+    });
+
+    if (existingNameConflict) {
+      return sendError(
+        res,
+        "Another active subscription plan with this name already exists",
+        HttpStatus.CONFLICT
+      );
+    }
+
+    if (plan.stripeProductId) {
+      await stripe.products.update(plan.stripeProductId, {
+        name,
+        description: description || "",
+        active: isActive,
+      });
+    }
+    stripePriceId = plan.stripePriceId;
+
+    if (price !== plan.price || duration !== plan.duration) {
+      const newPrice = await stripe.prices.create({
+        product: plan.stripeProductId!,
+        unit_amount: Math.round(price * 100),
+        currency: "usd",
+        recurring: {
+          interval: "month",
+          interval_count: duration,
+        },
+        active: isActive,
+
+      });
+      stripePriceId = newPrice.id;
+      newStripePriceCreated = true;
+    }
+    stripeProductId = plan.stripeProductId
+
+    const incomingIds = features.filter((f: any) => f.id).map((f: any) => f.id);
+    console.log('incomingIds', incomingIds)
+
+
+    await prisma.$transaction([
+      //  Update plan fields
+      prisma.subscriptionPlan.update({
+        where: { id: planId },
+        data: {
+          name,
+          price,
+          duration,
+          description,
+          isRecommended,
+          isActive,
+          stripePriceId
+        },
+      }),
+
+      //  Delete removed features
+      prisma.feature.deleteMany({
+        where: {
+          planId,
+          id: { notIn: incomingIds },
+        },
+      }),
+
+      // Update existing features
+      ...features
+        .filter((f: any) => f.id)
+        .map((f: any) =>
+          prisma.feature.update({
+            where: { id: f.id },
+            data: {
+              name: f.name,
+              description: f.description,
+            },
+          })
+        ),
+
+      // Create new features
+      prisma.feature.createMany({
+        data: features
+          .filter((f: any) => !f.id)
+          .map((f: any) => ({
+            planId,
+            name: f.name,
+            description: f.description,
+          })),
+      }),
+    ]);
+
+    const updatedPlan = await prisma.subscriptionPlan.findUnique({
+      where: { id: planId },
+      include: {
+        features: {
+          select: { id: true, name: true, description: true },
+        },
       },
     });
 
@@ -228,7 +388,25 @@ export const updatePlan = async (req: Request, res: Response) => {
       HttpStatus.OK
     );
   } catch (error: any) {
-    console.error("Update plan error:", error);
+
+    try {
+      if (newStripePriceCreated && stripePriceId && stripeProductId) {
+        // Deactivate the new price
+        await stripe.prices.update(stripePriceId, { active: false });
+
+        if (!req.body.isActive) {
+          await stripe.products.update(stripeProductId, {
+            active: false,
+            metadata: { rollback: "true", reason: "db_failed" },
+          });
+        }
+
+        console.log(`Stripe rollback completed for plan ${stripeProductId}`);
+      }
+    } catch (stripeError) {
+      console.error("Stripe rollback failed:", stripeError);
+    }
+
     sendError(
       res,
       error?.message || "Failed to update subscription plan",

@@ -10,6 +10,8 @@ import supportRoutes from './modules/support/support.routes';
 import profileRoutes from './modules/admin/profile/profile.routes';
 import subscriptionPlanRoutes from './modules/subscription-plans/subscription-plan.routes';
 import subscriptionPlanAdminRoutes from './modules/admin/subscription-plans/subscription-plan.routes';
+import subscriptionRoutes from './modules/subscription/subscription.routes'
+import stripeRoutes from './modules/stripe/stripe.routes'
 import { API_ROUTES } from './utils/constants/routes';
 
 // Load environment variables
@@ -49,6 +51,9 @@ app.use(API_ROUTES.SUPPORT.BASE, supportRoutes);
 app.use(API_ROUTES.PROFILE.ADMINBASE, profileRoutes);
 app.use(API_ROUTES.SUBSCRIPTIONPLAN.BASE, subscriptionPlanRoutes);
 app.use(API_ROUTES.SUBSCRIPTIONPLAN.ADMINBASE, subscriptionPlanAdminRoutes);
+app.use(API_ROUTES.SUBSCRIPTION.BASE, subscriptionRoutes);
+app.use(API_ROUTES.STRIPE.BASE, stripeRoutes);
+// app.use(API_ROUTES.WEBHOOK, webhookRoutes);
 
 // 404 handler
 app.use((req, res) => {

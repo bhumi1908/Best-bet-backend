@@ -1,5 +1,5 @@
 import { Router } from "express";
-import {  createPlan, deletePlan, getAllPlansAdmin, getPlanByIdAdmin, updatePlan } from "./subscription-plan.controller";
+import { createPlan, deletePlan, getAllPlansAdmin, getPlanByIdAdmin, updatePlan } from "./subscription-plan.controller";
 import { validateDto } from "../../../middleware/validateDto";
 import { authenticateToken } from "../../../middleware/auth";
 import { requireAdmin } from "../../../middleware/adminAuth";
@@ -10,19 +10,19 @@ const router = Router();
 
 //get All plan
 router.get("/",
-    authenticateToken,
-    requireAdmin,
-    authRateLimiter,
-    getAllPlansAdmin
+  authenticateToken,
+  requireAdmin,
+  authRateLimiter,
+  getAllPlansAdmin
 );
 
 // GET PLAN BY ID
 router.get(
-    "/:id",
-    authenticateToken,
-    requireAdmin,
-    authRateLimiter,
-    getPlanByIdAdmin
+  "/:id",
+  authenticateToken,
+  requireAdmin,
+  authRateLimiter,
+  getPlanByIdAdmin
 );
 
 //  CREATE PLAN

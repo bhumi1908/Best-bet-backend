@@ -25,4 +25,12 @@ export const updatePlanSchema = Joi.object({
   description: Joi.string().allow(null, ""),
   isRecommended: Joi.boolean().optional(),
   isActive: Joi.boolean().optional(),
+  features: Joi.array()
+    .items(
+      Joi.object({
+        name: Joi.string().required(),
+        description: Joi.string().allow(null, ""),
+      })
+    )
+    .optional(),
 }).min(1);
