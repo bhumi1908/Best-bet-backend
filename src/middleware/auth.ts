@@ -31,6 +31,9 @@ export const authenticateToken = async (
     const authHeader = req.headers['authorization'] as string | undefined;
     let token: string | undefined;
 
+    console.log('authHeader', authHeader)
+    
+    
     // Priority: cookie > header
     if (req.cookies?.accessToken) {
       token = req.cookies.accessToken;

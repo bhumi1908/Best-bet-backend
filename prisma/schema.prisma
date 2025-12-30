@@ -91,6 +91,10 @@ model SubscriptionPlan {
   duration      Int      // Month
   description   String?
   isRecommended Boolean   @default(false)
+  isActive      Boolean   @default(true) @map("is_active")
+
+  stripeProductId    String?   @unique
+  stripePriceId      String?   @unique
 
   features      Feature[]
   subscriptions UserSubscription[]
@@ -148,13 +152,14 @@ model Payment {
   userId           Int          
   amount           Float
   status           PaymentStatus
+  paymentMethod    String
   stripePaymentId  String        @unique
 
   user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscription     UserSubscription[]
   refund           Refund?
 
-    createdAt     DateTime  @default(now()) @map("created_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
    isDeleted     Boolean   @default(false)

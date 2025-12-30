@@ -15,7 +15,8 @@
     "prisma:studio": "prisma studio",
     "prisma:format": "prisma format",
     "postinstall": "prisma generate",
-    "test:db": "node test-connection.js"
+    "test:db": "node test-connection.js",
+    "seed": "ts-node prisma/seed.ts"
   },
   "keywords": [
     "express",
@@ -41,7 +42,8 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "multer-storage-cloudinary": "^4.0.0",
-    "nodemailer": "^7.0.11"
+    "nodemailer": "^7.0.11",
+    "stripe": "^20.1.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -56,6 +58,7 @@
     "@typescript-eslint/parser": "^6.17.0",
     "eslint": "^8.56.0",
     "prisma": "^7.1.0",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }

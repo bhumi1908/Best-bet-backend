@@ -7,7 +7,7 @@ import { sendError, sendSuccess } from "../../utils/helpers";
 export const getAllPlans = async (req: Request, res: Response) => {
     try {
         const plans = await prisma.subscriptionPlan.findMany({
-            where: { isDeleted: false },
+            where: { isDeleted: false, isActive: true },
             select: {
                 id: true,
                 name: true,
@@ -15,6 +15,7 @@ export const getAllPlans = async (req: Request, res: Response) => {
                 duration: true,
                 description: true,
                 isRecommended: true,
+                isActive: true,
                 features: {
                     where: { isDeleted: false },
                     select: {

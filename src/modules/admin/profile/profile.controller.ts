@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import prisma from "../../config/prisma";
-import { HttpStatus } from "../../utils/constants/enums";
-import { sendError, sendSuccess } from "../../utils/helpers";
+import prisma from "../../../config/prisma";
+import { HttpStatus } from "../../../utils/constants/enums";
+import { sendError, sendSuccess } from "../../../utils/helpers";
 import bcrypt from "bcryptjs";
 
 export const changeAdminPassword = async (
