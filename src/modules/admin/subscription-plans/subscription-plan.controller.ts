@@ -148,8 +148,6 @@ export const createPlan = async (req: Request, res: Response) => {
     });
     stripeProductId = product.id
 
-    console.log('product', product)
-
     const stripePrice = await stripe.prices.create({
       product: product.id,
       unit_amount: Math.round(price * 100),
@@ -161,8 +159,6 @@ export const createPlan = async (req: Request, res: Response) => {
       active: isActive,
     });
     stripePriceId = stripePrice.id
-
-    console.log('stripePrice', stripePrice)
 
     const plan = await prisma.subscriptionPlan.create({
       data: {
@@ -228,10 +224,6 @@ export const createPlan = async (req: Request, res: Response) => {
             rollback_reason: "db_failed",
           },
         });
-
-        console.log(
-          `Stripe rollback completed for product ${stripeProductId}`
-        );
       }
     } catch (stripeError) {
       console.error("Stripe rollback failed:", stripeError);
@@ -321,8 +313,6 @@ export const updatePlan = async (req: Request, res: Response) => {
     stripeProductId = plan.stripeProductId
 
     const incomingIds = features.filter((f: any) => f.id).map((f: any) => f.id);
-    console.log('incomingIds', incomingIds)
-
 
     await prisma.$transaction([
       //  Update plan fields
@@ -400,8 +390,6 @@ export const updatePlan = async (req: Request, res: Response) => {
             metadata: { rollback: "true", reason: "db_failed" },
           });
         }
-
-        console.log(`Stripe rollback completed for plan ${stripeProductId}`);
       }
     } catch (stripeError) {
       console.error("Stripe rollback failed:", stripeError);

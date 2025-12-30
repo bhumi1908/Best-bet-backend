@@ -32,6 +32,7 @@ export interface Features {
 export interface Payment {
   amount: number
   status: string
+  paymentMethod: string
   stripePaymentId: string | null
 }
 

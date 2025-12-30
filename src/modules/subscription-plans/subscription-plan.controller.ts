@@ -15,6 +15,7 @@ export const getAllPlans = async (req: Request, res: Response) => {
                 duration: true,
                 description: true,
                 isRecommended: true,
+                isActive: true,
                 features: {
                     where: { isDeleted: false },
                     select: {
