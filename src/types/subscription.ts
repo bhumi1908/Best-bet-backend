@@ -1,9 +1,19 @@
-export type SubscriptionStatus = "ACTIVE" | "EXPIRED" | "CANCELED";
+import { StringSchema } from "joi";
+
+export type SubscriptionStatus = "ACTIVE" | "EXPIRED" | "CANCELED" | "REFUNDED";
+type PaymentStatus =
+  "PENDING" |
+  "SUCCESS" |
+  "FAILED" |
+  "REFUNDED"
+
+
 export interface Subscription {
   subscriptionId: number
   user: User
   plan: Plan
   payment: Payment | null
+  stripeSubscriptionId: string | null
   status: string
   startDate: string
   endDate: string
@@ -14,6 +24,9 @@ export interface User {
   id: number
   name: string
   email: string
+  phoneNo: string | null
+  stripeCustomerId: string | null
+  createdAt: Date
 }
 
 export interface Plan {
@@ -21,6 +34,7 @@ export interface Plan {
   name: string
   price: number
   duration: number
+  description: string | null
   features: Features[]
 }
 
@@ -31,9 +45,10 @@ export interface Features {
 }
 export interface Payment {
   amount: number
-  status: string
   paymentMethod: string
   stripePaymentId: string | null
+  status: PaymentStatus
+  createdAt: Date
 }
 
 

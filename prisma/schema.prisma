@@ -28,14 +28,24 @@ enum RefundStatus {
   FAILED
 }
 
+enum SubscriptionStatus {
+  ACTIVE  
+  EXPIRED 
+  CANCELED 
+  REFUNDED
+}
+
 model User {
   id           Int       @id @default(autoincrement())
   firstName     String? @map("first_name")
   lastName     String? @map("last_name")
   email        String    @unique
+    phoneNo      String?   @unique @map("phone_no")
   passwordHash String    @map("password_hash")
   role         Role    @default(USER)
   refreshToken String?   @map("refresh_token")
+    stripeCustomerId       String?   @unique @map("stripe_customer_id")
+    
   isInactive    Boolean   @default(false) @map("is_inactive")
   forgotHashKey      String?   @unique
   forgotHashExpiresAt DateTime?
@@ -132,7 +142,9 @@ model UserSubscription {
   startDate              DateTime @map("start_date")
   endDate                DateTime @map("end_date")
   stripeSubscriptionId   String?   @unique
-  paymentId              Int?     
+  paymentId              Int?    
+
+  status                 SubscriptionStatus @default(ACTIVE) 
 
   user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan                   SubscriptionPlan @relation(fields: [planId], references: [id])

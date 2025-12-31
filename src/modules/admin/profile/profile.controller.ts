@@ -4,6 +4,8 @@ import { HttpStatus } from "../../../utils/constants/enums";
 import { sendError, sendSuccess } from "../../../utils/helpers";
 import bcrypt from "bcryptjs";
 
+const PHONE_REGEX = /^\+?[1-9]\d{0,2}[\s.-]?\(?\d{1,4}\)?([\s.-]?\d{2,4}){2,4}$/
+
 export const changeAdminPassword = async (
     req: Request,
     res: Response
@@ -123,12 +125,12 @@ export const editAdminProfileDetail = async (
             return;
         }
 
-        const { firstName, lastName } = req.body;
+        const { firstName, lastName, phoneNo } = req.body;
 
-        if (!firstName || !lastName) {
+        if (!firstName || !lastName || !phoneNo) {
             sendError(
                 res,
-                'First name and last name are required',
+                'First name, last name and phone number are required',
                 HttpStatus.BAD_REQUEST
             );
             return;
@@ -144,17 +146,60 @@ export const editAdminProfileDetail = async (
             return;
         }
 
+        // Check if phone number is being updated and if it already exists
+        if (phoneNo !== undefined && phoneNo !== null) {
+            const trimmedPhone = phoneNo.trim();
+
+            if (!trimmedPhone) {
+                sendError(
+                    res,
+                    'Phone number is required',
+                    HttpStatus.BAD_REQUEST
+                );
+                return;
+            }
+
+            if (!PHONE_REGEX.test(trimmedPhone)) {
+                sendError(
+                    res,
+                    'Please provide a valid phone number',
+                    HttpStatus.BAD_REQUEST
+                );
+                return;
+            }
+
+            const existingPhone = await prisma.user.findFirst({
+                where: {
+                    phoneNo: phoneNo.trim(),
+                    id: { not: id },
+                },
+                select: { id: true },
+            });
+
+            if (existingPhone) {
+                sendError(res, 'Phone number already exists', HttpStatus.BAD_REQUEST);
+                return;
+            }
+        }
+
+        const updateData: any = {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+        };
+
+        if (phoneNo !== undefined && phoneNo !== null) {
+            updateData.phoneNo = phoneNo.trim();
+        }
+
         const updatedUser = await prisma.user.update({
             where: { id },
-            data: {
-                firstName: firstName.trim(),
-                lastName: lastName.trim(),
-            },
+            data: updateData,
             select: {
                 id: true,
                 email: true,
                 firstName: true,
                 lastName: true,
+                phoneNo: true,
                 role: true,
             },
         });
