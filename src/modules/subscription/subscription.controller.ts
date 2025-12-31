@@ -13,6 +13,7 @@ export const getAllSubscribedUsersAdmin = async (
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 10;
 
+        console.log('req.query.startDateTo', req.query.startDateTo)
         // Parse filters
         const filters = {
             search: req.query.search as string | undefined,
@@ -25,18 +26,14 @@ export const getAllSubscribedUsersAdmin = async (
             startDateTo: req.query.startDateTo
                 ? new Date(req.query.startDateTo as string)
                 : undefined,
+                sortBy: req.query.sortBy as string || "createdAt",
+                sortOrder : (req.query.sortOrder as "asc" | "desc") || "desc"
         };
-
-        // Parse sorting
-        const sortBy = (req.query.sortBy as string) || "createdAt";
-        const sortOrder = (req.query.sortOrder as "asc" | "desc") || "desc";
 
         // Get subscriptions from service
         const result = await getAllSubscriptions(
             filters,
             { page, limit },
-            sortBy,
-            sortOrder
         );
 
         sendSuccess(

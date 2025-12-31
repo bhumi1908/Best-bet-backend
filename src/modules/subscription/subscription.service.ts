@@ -24,13 +24,14 @@ export const calculateSubscriptionStatus = (
 export const formatSubscription = (
     sub: Prisma.UserSubscriptionGetPayload<{
         include: {
-            user: { select: { id: true; firstName: true; lastName: true; email: true } };
+            user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true } };
             plan: {
                 select: {
                     id: true;
                     name: true;
                     price: true;
                     duration: true;
+                    description: true;
                     features: {
                         select: { id: true; name: true; description: true };
                     };
@@ -39,10 +40,10 @@ export const formatSubscription = (
             payment: {
                 select: {
                     amount: true;
-                    status: true;
                     paymentMethod: true
                     stripePaymentId: true;
                     createdAt: true;
+                    status: true;
                 };
             };
         };
@@ -56,23 +57,29 @@ export const formatSubscription = (
             id: sub.user.id,
             name: `${sub.user.firstName ?? ""} ${sub.user.lastName ?? ""}`.trim(),
             email: sub.user.email,
+            phoneNo: sub.user.phoneNo,
+            stripeCustomerId: sub.user.stripeCustomerId,
+            createdAt: sub.user.createdAt
         },
         plan: {
             id: sub.plan.id,
             name: sub.plan.name,
             price: sub.plan.price,
             duration: sub.plan.duration,
+            description: sub.plan.description,
             features: sub.plan.features,
         },
         payment: sub.payment
             ? {
-                amount: sub.payment.amount,
                 status: sub.payment.status,
+                amount: sub.payment.amount,
                 paymentMethod: sub.payment.paymentMethod,
                 stripePaymentId: sub.payment.stripePaymentId,
+                createdAt: sub.payment.createdAt
             }
             : null,
-        status,
+        stripeSubscriptionId:  sub.stripeSubscriptionId,
+        status: sub.status,
         startDate: sub.startDate.toISOString(),
         endDate: sub.endDate.toISOString(),
         createdAt: sub.createdAt.toISOString(),
@@ -89,11 +96,14 @@ export interface SubscriptionFilters {
     plan?: string;
     startDateFrom?: Date;
     startDateTo?: Date;
+    sortBy: string,
+    sortOrder: "asc" | "desc"
 }
 
 export const buildSubscriptionWhereClause = (
     filters: SubscriptionFilters
 ): Prisma.UserSubscriptionWhereInput => {
+    console.log('filters', filters)
     const now = new Date();
     const where: Prisma.UserSubscriptionWhereInput = {
         isDeleted: false,
@@ -166,6 +176,9 @@ export const getSubscriptionInclude = () => ({
             firstName: true,
             lastName: true,
             email: true,
+            phoneNo: true,
+            stripeCustomerId: true,
+            createdAt: true
         },
     },
     plan: {
@@ -174,6 +187,7 @@ export const getSubscriptionInclude = () => ({
             name: true,
             price: true,
             duration: true,
+            description: true,
             features: {
                 where: { isDeleted: false },
                 select: {
@@ -187,13 +201,22 @@ export const getSubscriptionInclude = () => ({
     payment: {
         select: {
             amount: true,
-            status: true,
             paymentMethod: true,
             stripePaymentId: true,
             createdAt: true,
+            status: true
         },
     },
 });
+
+const buildOrderBy = (sortBy: string, sortOrder: "asc" | "desc") => {
+    if (sortBy.includes(".")) {
+        const parts = sortBy.split("."); // e.g., ["user", "email"]
+        return { [parts[0]]: { [parts[1]]: sortOrder } };
+    }
+    return { [sortBy]: sortOrder };
+};
+
 
 /**
  * Get all subscriptions with filters and pagination
@@ -201,15 +224,22 @@ export const getSubscriptionInclude = () => ({
 export const getAllSubscriptions = async (
     filters: SubscriptionFilters,
     pagination: { page: number; limit: number },
-    sortBy: string = "createdAt",
-    sortOrder: "asc" | "desc" = "desc"
 ) => {
+
+    console.log('filters ', filters)
+
+
     const skip = (pagination.page - 1) * pagination.limit;
     const where = buildSubscriptionWhereClause(filters);
 
-    const orderBy: Prisma.UserSubscriptionOrderByWithRelationInput = {
-        [sortBy]: sortOrder,
-    } as Prisma.UserSubscriptionOrderByWithRelationInput;
+    // const orderBy: Prisma.UserSubscriptionOrderByWithRelationInput = {
+    //     [filters.sortBy]: filters.sortOrder,
+    // } as Prisma.UserSubscriptionOrderByWithRelationInput;
+
+    const orderBy = buildOrderBy(filters.sortBy, filters.sortOrder);
+
+
+    console.log('orderBy', orderBy)
 
     const [subscriptions, total] = await Promise.all([
         prisma.userSubscription.findMany({

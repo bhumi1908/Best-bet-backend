@@ -11,6 +11,9 @@ export const updateUserSchema = Joi.object({
     'string.min': 'Last name must be at least 2 characters long',
     'string.max': 'Last name must not exceed 50 characters',
   }),
+  phoneNo: Joi.string().trim().pattern(/^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/).optional().messages({
+    'string.pattern.base': 'Please provide a valid phone number',
+  }),
   role: Joi.string()
     .valid(UserRole.USER, UserRole.ADMIN)
     .optional()
