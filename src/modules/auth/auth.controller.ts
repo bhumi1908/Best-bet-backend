@@ -20,15 +20,16 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 // User Register 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, firstName, lastName, role } = req.body;
+    const { email, password, firstName, lastName, phoneNo, role } = req.body;
+    console.log('req.body', req.body)
 
     // Validate input
-    if (!email || !password || !firstName || !lastName) {
-      sendError(res, 'Email and password are required', HttpStatus.BAD_REQUEST);
+    if (!email || !password || !firstName || !lastName || !phoneNo) {
+      sendError(res, 'Email, password, first name, last name, and phone number are required', HttpStatus.BAD_REQUEST);
       return;
     }
 
-    // Check if user already exists
+    // Check if user already exists by email
     const existingUser = await prisma.user.findUnique({
       where: { email },
       select: { id: true },
@@ -36,6 +37,17 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     if (existingUser) {
       sendError(res, 'User with this email already exists', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    // Check if phone number already exists
+    const existingPhone = await prisma.user.findFirst({
+      where: { phoneNo },
+      select: { id: true },
+    });
+
+    if (existingPhone) {
+      sendError(res, 'User with this phone number already exists', HttpStatus.BAD_REQUEST);
       return;
     }
 
@@ -50,6 +62,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         passwordHash,
         firstName: firstName,
         lastName: lastName,
+        phoneNo: phoneNo,
         role: role ?? UserRole.USER,
       },
       select: {
@@ -57,6 +70,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         email: true,
         firstName: true,
         lastName: true,
+        phoneNo: true,
         role: true,
       },
     });
@@ -69,6 +83,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
+          phoneNo: user.phoneNo,
           role: user.role,
         },
       },
@@ -78,7 +93,14 @@ export const register = async (req: Request, res: Response): Promise<void> => {
   } catch (error: any) {
 
     if (error?.code === 'P2002') {
-      sendError(res, 'User with this email already exists', HttpStatus.BAD_REQUEST);
+      // Check which unique constraint was violated
+      if (error.meta?.target?.includes('email')) {
+        sendError(res, 'User with this email already exists', HttpStatus.BAD_REQUEST);
+      } else if (error.meta?.target?.includes('phone_no')) {
+        sendError(res, 'User with this phone number already exists', HttpStatus.BAD_REQUEST);
+      } else {
+        sendError(res, 'A user with this information already exists', HttpStatus.BAD_REQUEST);
+      }
       return;
     }
 
@@ -121,7 +143,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         firstName: true,
         lastName: true,
         isInactive: true,
-        role: true
+        role: true,
+        phoneNo:true,
       },
     });
     if (!user) {
@@ -177,7 +200,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
-          role: user.role
+          role: user.role,
+          phoneNo: user.phoneNo
         },
         token: {
           accessToken,

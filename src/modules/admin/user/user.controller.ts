@@ -31,6 +31,7 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
         { email: { contains: search, mode: 'insensitive' } },
         { firstName: { contains: search, mode: 'insensitive' } },
         { lastName: { contains: search, mode: 'insensitive' } },
+        { phoneNo: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -47,6 +48,7 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
           email: true,
           firstName: true,
           lastName: true,
+          phoneNo: true,
           role: true,
           isInactive: true,
           createdAt: true,
@@ -110,6 +112,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         email: true,
         firstName: true,
         lastName: true,
+        phoneNo: true,
         role: true,
         isInactive: true,
         createdAt: true,
@@ -156,7 +159,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 export const updateUser = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = parseInt(req.params.id);
-    const { firstName, lastName, role, isInactive } = req.body;
+    const { firstName, lastName, phoneNo, role, isInactive } = req.body;
     const currentUserId = req.user?.id;
 
     if (isNaN(userId)) {
@@ -207,8 +210,25 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
     const updateData: any = {};
     if (firstName !== undefined) updateData.firstName = firstName;
     if (lastName !== undefined) updateData.lastName = lastName;
+    if (phoneNo !== undefined) updateData.phoneNo = phoneNo;
     if (role !== undefined) updateData.role = role;
     if (isInactive !== undefined) updateData.isInactive = isInactive;
+
+    // Check if phone number is being updated and if it already exists
+    if (phoneNo !== undefined && phoneNo !== null) {
+      const existingPhone = await prisma.user.findFirst({
+        where: {
+          phoneNo: phoneNo,
+          id: { not: userId },
+        },
+        select: { id: true },
+      });
+
+      if (existingPhone) {
+        sendError(res, 'Phone number already exists', HttpStatus.BAD_REQUEST);
+        return;
+      }
+    }
 
     // Update user
     const updatedUser = await prisma.user.update({
@@ -219,6 +239,7 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
         email: true,
         firstName: true,
         lastName: true,
+        phoneNo: true,
         role: true,
         isInactive: true,
         createdAt: true,

@@ -25,6 +25,10 @@ export const registerSchema = Joi.object({
     'string.max': 'Last name must not exceed 50 characters',
     'any.required': 'Last name is required',
   }),
+  phoneNo: Joi.string().trim().pattern(/^\+?[1-9]\d{0,2}[\s.-]?\(?\d{1,4}\)?([\s.-]?\d{2,4}){2,4}$/).required().messages({
+    'string.pattern.base': 'Please provide a valid phone number',
+    'any.required': 'Phone number is required',
+  }),
   role: Joi.string()
     .valid("USER", "ADMIN")
     .optional()
