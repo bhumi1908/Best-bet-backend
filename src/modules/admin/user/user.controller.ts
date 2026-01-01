@@ -53,6 +53,32 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
           isInactive: true,
           createdAt: true,
           updatedAt: true,
+            subscriptions: {
+          where: {
+            isDeleted: false,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+          select: {
+            id: true,
+            startDate: true,
+            endDate: true,
+            status: true,
+            createdAt: true,
+
+            plan: {
+              select: {
+                id: true,
+                name: true,
+                price: true,
+                duration: true,
+                isRecommended: true,
+              },
+            },
+          },
+        }
         },
         skip,
         take: limit,
@@ -117,6 +143,40 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         isInactive: true,
         createdAt: true,
         updatedAt: true,
+       subscriptions: {
+          where: { isDeleted: false },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            startDate: true,
+            endDate: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            plan: {
+              select: {
+                id: true,
+                name: true,
+                price: true,
+                duration: true,
+                isRecommended: true,
+              },
+            },
+            payment: {
+              select: {
+                amount: true,
+                paymentMethod: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
+        payments: {
+          where: { isDeleted: false },
+          select: {
+            amount: true,
+          },
+        },
       },
     });
 
@@ -125,9 +185,66 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+     // Current active subscription (latest with status ACTIVE)
+    const activeSubscription = user.subscriptions.find(
+      (sub) => sub.status === 'ACTIVE'
+    ) || null;
+
+    // Total payments
+    const totalPaid = user.payments.reduce((acc, p) => acc + p.amount, 0);
+
+    // Subscription age in days
+    const subscriptionAge =
+      activeSubscription && activeSubscription.startDate
+        ? Math.floor(
+            (new Date().getTime() - new Date(activeSubscription.startDate).getTime()) /
+              (1000 * 60 * 60 * 24)
+          )
+        : 0;
+
+    // Map subscriptions for response
+    const allSubscriptions = user.subscriptions.map((sub) => ({
+      id: sub.id,
+      planName: sub.plan.name,
+      price: sub.plan.price,
+      startDate: sub.startDate,
+      endDate: sub.endDate,
+      status: sub.status,
+      paymentMethod: sub.payment?.paymentMethod || 'N/A',
+      createdAt: sub.createdAt,
+      updatedAt: sub.updatedAt,
+    }));
+
+    // Final response
+    const response = {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phoneNo: user.phoneNo,
+      role: user.role,
+      isInactive: user.isInactive,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      currentSubscription: activeSubscription
+        ? {
+            id: activeSubscription.id,
+            planName: activeSubscription.plan.name,
+            price: activeSubscription.plan.price,
+            startDate: activeSubscription.startDate,
+            endDate: activeSubscription.endDate,
+            status: activeSubscription.status,
+            paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
+          }
+        : null,
+      totalPayments: totalPaid,
+      subscriptionAgeDays: subscriptionAge,
+      allSubscriptions,
+    };
+
     sendSuccess(
       res,
-      user,
+      response,
       'User retrieved successfully'
     );
   } catch (error: any) {

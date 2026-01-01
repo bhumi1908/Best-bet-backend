@@ -98,7 +98,8 @@ model SubscriptionPlan {
   id            Int       @id @default(autoincrement()) 
   name          String    @unique
   price         Float
-  duration      Int      // Month
+  duration      Int     // Month
+
   description   String?
   isRecommended Boolean   @default(false)
   isActive      Boolean   @default(true) @map("is_active")
