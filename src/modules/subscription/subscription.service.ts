@@ -280,3 +280,205 @@ export const getSubscriptionById = async (subscriptionId: number) => {
     return formatSubscription(subscription);
 };
 
+
+const calculateGrowth = (current: number, previous: number): number => {
+  if (previous === 0) return 100;
+  return Number((((current - previous) / previous) * 100).toFixed(1));
+};
+
+export const getSubscriptionDashboardStats = async () => {
+  const now = new Date();
+
+  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  /* =======================
+     AGGREGATES
+  ======================== */
+
+  const [
+    totalRevenue,
+    thisMonthRevenue,
+    lastMonthRevenue,
+
+    activeSubscriptions,
+    totalSubscriptions,
+    activeLastMonth
+  ] = await Promise.all([
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: { status: "SUCCESS", isDeleted: false }
+    }),
+
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        isDeleted: false,
+        createdAt: { gte: startOfThisMonth }
+      }
+    }),
+
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        isDeleted: false,
+        createdAt: { gte: startOfLastMonth, lte: startOfThisMonth }
+      }
+    }),
+
+    prisma.userSubscription.count({
+      where: { status: "ACTIVE", isDeleted: false }
+    }),
+
+    prisma.userSubscription.count({
+      where: { isDeleted: false }
+    }),
+
+    prisma.userSubscription.count({
+      where: {
+        status: "ACTIVE",
+        isDeleted: false,
+        createdAt: { lte: startOfThisMonth }
+      }
+    })
+  ]);
+
+  /* =======================
+     CHART DATA
+  ======================== */
+
+  // Revenue (last 5 months)
+  const revenueChartData = await getMonthlyRevenueChart(5);
+
+  // Active subscriptions trend
+  const subscriptionsChartData = await getSubscriptionsTrend(5);
+
+  // Monthly revenue (weekly)
+  const monthlyRevenueChartData = await getWeeklyRevenueChart(startOfThisMonth);
+
+  /* =======================
+     FINAL RESPONSE
+  ======================== */
+
+const [activePlans, totalPlans] = await Promise.all([
+  prisma.subscriptionPlan.count({
+    where: { isActive: true, isDeleted:false },
+  }),
+  prisma.subscriptionPlan.count({
+    where: {isDeleted: false}
+  }),
+])
+
+
+  return {
+    stats: {
+      totalRevenue: totalRevenue._sum.amount || 0,
+      monthlyRevenue: thisMonthRevenue._sum.amount || 0,
+
+      activeSubscriptions,
+      totalSubscriptions,
+      activePlans,
+      totalPlans,
+
+      totalRevenueGrowth: calculateGrowth(
+        thisMonthRevenue._sum.amount || 0,
+        lastMonthRevenue._sum.amount || 0
+      ),
+
+      monthlyRevenueGrowth: calculateGrowth(
+        thisMonthRevenue._sum.amount || 0,
+        lastMonthRevenue._sum.amount || 0
+      ),
+
+      activeSubscriptionsGrowth: calculateGrowth(
+        activeSubscriptions,
+        activeLastMonth
+      )
+    },
+
+    charts: {
+      revenueChartData,
+      subscriptionsChartData,
+      monthlyRevenueChartData
+    }
+  };
+};
+
+
+
+const getMonthlyRevenueChart = async (months: number) => {
+  const now = new Date();
+  const data = [];
+
+  for (let i = months - 1; i >= 0; i--) {
+    const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+    const revenue = await prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        createdAt: { gte: start, lte: end }
+      }
+    });
+
+    data.push({
+      label: start.toLocaleString("default", { month: "short" }),
+      value: revenue._sum.amount || 0
+    });
+  }
+
+  return data;
+};
+
+const getSubscriptionsTrend = async (months: number) => {
+  const now = new Date();
+  const data = [];
+
+  for (let i = months - 1; i >= 0; i--) {
+    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+    const count = await prisma.userSubscription.count({
+      where: {
+        status: "ACTIVE",
+        createdAt: { lte: end }
+      }
+    });
+
+    data.push({
+      label: end.toLocaleString("default", { month: "short" }),
+      value: count
+    });
+  }
+
+  return data;
+};
+
+const getWeeklyRevenueChart = async (monthStart: Date) => {
+  const data = [];
+
+  for (let week = 0; week <= 4; week++) {
+    const start = new Date(monthStart);
+    start.setDate(1 + week * 7);
+
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+
+    const revenue = await prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        createdAt: { gte: start, lte: end }
+      }
+    });
+
+    data.push({
+      label: `Week ${week + 1}`,
+      value: revenue._sum.amount || 0
+    });
+  }
+
+  return data;
+};
