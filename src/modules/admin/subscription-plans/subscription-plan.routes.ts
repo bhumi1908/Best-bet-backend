@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createPlan, deletePlan, getAllPlansAdmin, getPlanByIdAdmin, updatePlan } from "./subscription-plan.controller";
+import { createPlan, deletePlan, getAllPlansAdmin, getPlanByIdAdmin, togglePlanStatus, updatePlan } from "./subscription-plan.controller";
 import { validateDto } from "../../../middleware/validateDto";
 import { authenticateToken } from "../../../middleware/auth";
 import { requireAdmin } from "../../../middleware/adminAuth";
@@ -43,6 +43,15 @@ router.put(
   authRateLimiter,
   validateDto(updatePlanSchema),
   updatePlan
+);
+
+// ACtive / Inactive PLAN
+router.put(
+  "/:id/status",
+  authenticateToken,
+  requireAdmin,
+  authRateLimiter,
+  togglePlanStatus
 );
 
 // DELETE PLAN (SOFT DELETE)
