@@ -53,32 +53,32 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
           isInactive: true,
           createdAt: true,
           updatedAt: true,
-            subscriptions: {
-          where: {
-            isDeleted: false,
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-          take: 1,
-          select: {
-            id: true,
-            startDate: true,
-            endDate: true,
-            status: true,
-            createdAt: true,
+          subscriptions: {
+            where: {
+              isDeleted: false,
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 1,
+            select: {
+              id: true,
+              startDate: true,
+              endDate: true,
+              status: true,
+              createdAt: true,
 
-            plan: {
-              select: {
-                id: true,
-                name: true,
-                price: true,
-                duration: true,
-                isRecommended: true,
+              plan: {
+                select: {
+                  id: true,
+                  name: true,
+                  price: true,
+                  duration: true,
+                  isRecommended: true,
+                },
               },
             },
-          },
-        }
+          }
         },
         skip,
         take: limit,
@@ -143,7 +143,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         isInactive: true,
         createdAt: true,
         updatedAt: true,
-       subscriptions: {
+        subscriptions: {
           where: { isDeleted: false },
           orderBy: { createdAt: 'desc' },
           select: {
@@ -185,22 +185,29 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-     // Current active subscription (latest with status ACTIVE)
-    const activeSubscription = user.subscriptions.find(
-      (sub) => sub.status === 'ACTIVE'
-    ) || null;
+    // Current active subscription (latest with status ACTIVE)
+    const activeSubscription = user.subscriptions.find((sub) => sub.status === 'ACTIVE') ||
+      user.subscriptions.find((sub) => sub.status === 'TRIAL') ||
+      null;
 
     // Total payments
     const totalPaid = user.payments.reduce((acc, p) => acc + p.amount, 0);
+
+
 
     // Subscription age in days
     const subscriptionAge =
       activeSubscription && activeSubscription.startDate
         ? Math.floor(
-            (new Date().getTime() - new Date(activeSubscription.startDate).getTime()) /
-              (1000 * 60 * 60 * 24)
-          )
+          (new Date().getTime() - new Date(activeSubscription.startDate).getTime()) /
+          (1000 * 60 * 60 * 24)
+        )
         : 0;
+
+    const isOnTrial =
+      activeSubscription?.status === 'TRIAL' &&
+      new Date(activeSubscription.endDate) > new Date();
+
 
     // Map subscriptions for response
     const allSubscriptions = user.subscriptions.map((sub) => ({
@@ -228,14 +235,15 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       updatedAt: user.updatedAt,
       currentSubscription: activeSubscription
         ? {
-            id: activeSubscription.id,
-            planName: activeSubscription.plan.name,
-            price: activeSubscription.plan.price,
-            startDate: activeSubscription.startDate,
-            endDate: activeSubscription.endDate,
-            status: activeSubscription.status,
-            paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
-          }
+          id: activeSubscription.id,
+          planName: activeSubscription.plan.name,
+          price: activeSubscription.plan.price,
+          startDate: activeSubscription.startDate,
+          endDate: activeSubscription.endDate,
+          status: activeSubscription.status,
+          isOnTrial,
+          paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
+        }
         : null,
       totalPayments: totalPaid,
       subscriptionAgeDays: subscriptionAge,

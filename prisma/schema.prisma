@@ -29,6 +29,7 @@ enum RefundStatus {
 }
 
 enum SubscriptionStatus {
+  TRIAL
   ACTIVE  
   EXPIRED 
   CANCELED 
@@ -52,7 +53,7 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
-   uploads               Upload[]
+  uploads               Upload[]
   subscriptions         UserSubscription[]
   payments              Payment[]
   refunds               Refund[]
@@ -97,10 +98,12 @@ model Support {
 model SubscriptionPlan {
   id            Int       @id @default(autoincrement()) 
   name          String    @unique
-  price         Float
-  duration      Int     // Month
+  price         Float?
+  duration      Int?     // Month
+  trialDays     Int?     // Days
 
   description   String?
+   discountPercent Float?  @default(0)
   isRecommended Boolean   @default(false)
   isActive      Boolean   @default(true) @map("is_active")
 
@@ -142,6 +145,7 @@ model UserSubscription {
   planId                 Int     
   startDate              DateTime @map("start_date")
   endDate                DateTime @map("end_date")
+  
   stripeSubscriptionId   String?   @unique
   paymentId              Int?    
 
