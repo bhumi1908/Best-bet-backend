@@ -27,7 +27,7 @@ export const getAllPlans = async (req: Request, res: Response) => {
                     },
                 },
             },
-            orderBy: { price: "asc" },
+            orderBy: { price: "desc" },
         });
 
         sendSuccess(res, { plans }, "Subscription plans fetched successfully", HttpStatus.OK);
