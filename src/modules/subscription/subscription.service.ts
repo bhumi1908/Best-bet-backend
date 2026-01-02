@@ -64,8 +64,8 @@ export const formatSubscription = (
         plan: {
             id: sub.plan.id,
             name: sub.plan.name,
-            price: sub.plan.price,
-            duration: sub.plan.duration,
+            price: sub.plan.price ?? 0,
+            duration: sub.plan.duration ?? 0,
             description: sub.plan.description,
             features: sub.plan.features,
         },
