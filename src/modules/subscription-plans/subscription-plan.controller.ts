@@ -16,6 +16,8 @@ export const getAllPlans = async (req: Request, res: Response) => {
                 description: true,
                 isRecommended: true,
                 isActive: true,
+                discountPercent:true,
+                 trialDays: true,
                 features: {
                     where: { isDeleted: false },
                     select: {

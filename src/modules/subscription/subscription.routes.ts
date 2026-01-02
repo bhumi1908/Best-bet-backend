@@ -42,13 +42,6 @@ router.get(
   getSubscriptionDetailsAdmin
 );
 
-router.post(
-  "/users/:userId/revoke",
-  authenticateToken,
-  requireAdmin,
-  authRateLimiter,
-//   revokeUserSubscriptionAdmin
-);
 
 router.post(
   "/users/:userId/revoke",
