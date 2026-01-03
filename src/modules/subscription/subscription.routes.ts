@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticateToken } from "../../middleware/auth";
 import { authRateLimiter } from "../../middleware/rateLimiter";
 import { requireAdmin } from "../../middleware/adminAuth";
-import { changeUserSubscriptionPlan, getAllSubscribedUsersAdmin, getSubscriptionDashboardAdmin, getSubscriptionDetailsAdmin, refundSubscriptionPaymentAdmin, revokeUserSubscriptionAdmin } from "./subscription.controller";
+import { changeUserSubscriptionPlan, createCheckoutSession, getAllSubscribedUsersAdmin, getSubscriptionDashboardAdmin, getSubscriptionDetailsAdmin, getUserSubscription, refundSubscriptionPaymentAdmin, revokeUserSubscriptionAdmin } from "./subscription.controller";
 
 const router = Router();
 
@@ -12,10 +12,21 @@ const router = Router();
  * User clicks "Subscribe"
  */
 router.post(
-    "/checkout",
-    authRateLimiter,
-    // createCheckoutSession
+  "/checkout",
+  authRateLimiter,
+  createCheckoutSession
 );
+
+/**
+ * Get current user's subscription details
+ */
+router.get("/me/subscription", authenticateToken, getUserSubscription);
+
+/**
+ * ===========================
+ * ADMIN-FACING ROUTES
+ * ===========================
+ */
 
 router.get(
   "/dashboard",
