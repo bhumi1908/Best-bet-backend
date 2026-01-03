@@ -196,13 +196,14 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 
 
     // Subscription age in days
-    const subscriptionAge =
-      activeSubscription && activeSubscription.startDate
-        ? Math.floor(
-          (new Date().getTime() - new Date(activeSubscription.startDate).getTime()) /
+   const subscriptionAge =
+  activeSubscription?.startDate && activeSubscription?.endDate
+    ? Math.floor(
+        (new Date(activeSubscription.endDate).getTime() -
+          new Date(activeSubscription.startDate).getTime()) /
           (1000 * 60 * 60 * 24)
-        )
-        : 0;
+      ) 
+    : 0;
 
     const isOnTrial =
       activeSubscription?.status === 'TRIAL' &&
