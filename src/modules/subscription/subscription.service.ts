@@ -1,4 +1,5 @@
 import prisma from "../../config/prisma";
+import stripe from "../../config/stripe";
 import { Prisma } from "../../generated/prisma/client";
 import { Subscription, SubscriptionStatus } from "../../types/subscription";
 
@@ -6,215 +7,214 @@ import { Subscription, SubscriptionStatus } from "../../types/subscription";
  * Calculate subscription status based on stripeSubscriptionId and endDate
  */
 export const calculateSubscriptionStatus = (
-    stripeSubscriptionId: string | null,
-    endDate: Date
+  stripeSubscriptionId: string | null,
+  endDate: Date
 ): SubscriptionStatus => {
-    if (!stripeSubscriptionId) {
-        return "CANCELED";
-    }
-    if (endDate > new Date()) {
-        return "ACTIVE";
-    }
-    return "EXPIRED";
+  if (!stripeSubscriptionId) {
+    return "CANCELED";
+  }
+  if (endDate > new Date()) {
+    return "ACTIVE";
+  }
+  return "EXPIRED";
 };
 
 /**
  * Format subscription data to match Subscription interface
  */
 export const formatSubscription = (
-    sub: Prisma.UserSubscriptionGetPayload<{
-        include: {
-            user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true } };
-            plan: {
-                select: {
-                    id: true;
-                    name: true;
-                    price: true;
-                    duration: true;
-                    description: true;
-                    features: {
-                        select: { id: true; name: true; description: true };
-                    };
-                };
-            };
-            payment: {
-                select: {
-                    amount: true;
-                    paymentMethod: true
-                    stripePaymentId: true;
-                    createdAt: true;
-                    status: true;
-                };
-            };
+  sub: Prisma.UserSubscriptionGetPayload<{
+    include: {
+      user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true } };
+      plan: {
+        select: {
+          id: true;
+          name: true;
+          price: true;
+          duration: true;
+          description: true;
+          features: {
+            select: { id: true; name: true; description: true };
+          };
         };
-    }>
-): Subscription => {
-    const status = calculateSubscriptionStatus(sub.stripeSubscriptionId, sub.endDate);
-
-    return {
-        subscriptionId: sub.id,
-        user: {
-            id: sub.user.id,
-            name: `${sub.user.firstName ?? ""} ${sub.user.lastName ?? ""}`.trim(),
-            email: sub.user.email,
-            phoneNo: sub.user.phoneNo,
-            stripeCustomerId: sub.user.stripeCustomerId,
-            createdAt: sub.user.createdAt
-        },
-        plan: {
-            id: sub.plan.id,
-            name: sub.plan.name,
-            price: sub.plan.price ?? 0,
-            duration: sub.plan.duration ?? 0,
-            description: sub.plan.description,
-            features: sub.plan.features,
-        },
-        payment: sub.payment
-            ? {
-                status: sub.payment.status,
-                amount: sub.payment.amount,
-                paymentMethod: sub.payment.paymentMethod,
-                stripePaymentId: sub.payment.stripePaymentId,
-                createdAt: sub.payment.createdAt
-            }
-            : null,
-        stripeSubscriptionId:  sub.stripeSubscriptionId,
-        status: sub.status,
-        startDate: sub.startDate.toISOString(),
-        endDate: sub.endDate.toISOString(),
-        createdAt: sub.createdAt.toISOString(),
+      };
+      payment: {
+        select: {
+          amount: true;
+          paymentMethod: true
+          stripePaymentId: true;
+          createdAt: true;
+          status: true;
+        };
+      };
     };
+  }>
+): Subscription => {
+  const status = calculateSubscriptionStatus(sub.stripeSubscriptionId, sub.endDate);
+
+  return {
+    subscriptionId: sub.id,
+    user: {
+      id: sub.user.id,
+      name: `${sub.user.firstName ?? ""} ${sub.user.lastName ?? ""}`.trim(),
+      email: sub.user.email,
+      phoneNo: sub.user.phoneNo,
+      stripeCustomerId: sub.user.stripeCustomerId,
+      createdAt: sub.user.createdAt
+    },
+    plan: {
+      id: sub.plan.id,
+      name: sub.plan.name,
+      price: sub.plan.price ?? 0,
+      duration: sub.plan.duration ?? 0,
+      description: sub.plan.description,
+      features: sub.plan.features,
+    },
+    payment: sub.payment
+      ? {
+        status: sub.payment.status,
+        amount: sub.payment.amount,
+        paymentMethod: sub.payment.paymentMethod,
+        stripePaymentId: sub.payment.stripePaymentId,
+        createdAt: sub.payment.createdAt
+      }
+      : null,
+    stripeSubscriptionId: sub.stripeSubscriptionId,
+    status: sub.status,
+    startDate: sub.startDate.toISOString(),
+    endDate: sub.endDate.toISOString(),
+    createdAt: sub.createdAt.toISOString(),
+  };
 };
 
 /**
  * Build WHERE clause for subscription queries
  */
 export interface SubscriptionFilters {
-    search?: string;
-    status?: SubscriptionStatus;
-    planId?: number;
-    plan?: string;
-    startDateFrom?: Date;
-    startDateTo?: Date;
-    sortBy: string,
-    sortOrder: "asc" | "desc"
+  search?: string;
+  status?: SubscriptionStatus;
+  planId?: number;
+  plan?: string;
+  startDateFrom?: Date;
+  startDateTo?: Date;
+  sortBy: string,
+  sortOrder: "asc" | "desc"
 }
 
 export const buildSubscriptionWhereClause = (
-    filters: SubscriptionFilters
+  filters: SubscriptionFilters
 ): Prisma.UserSubscriptionWhereInput => {
-    console.log('filters', filters)
-    const now = new Date();
-    const where: Prisma.UserSubscriptionWhereInput = {
-        isDeleted: false,
-        user: { isInactive: false },
-        plan: { isDeleted: false },
+  const now = new Date();
+  const where: Prisma.UserSubscriptionWhereInput = {
+    isDeleted: false,
+    user: { isInactive: false },
+    plan: { isDeleted: false },
+  };
+
+  // Search filter (user name / email)
+  if (filters.search) {
+    where.OR = [
+      { user: { email: { contains: filters.search, mode: "insensitive" } } },
+      { user: { firstName: { contains: filters.search, mode: "insensitive" } } },
+      { user: { lastName: { contains: filters.search, mode: "insensitive" } } },
+      { plan: { name: { contains: filters.search, mode: "insensitive" } } },
+    ];
+  }
+
+  // Filter by plan ID
+  if (filters.planId) {
+    where.planId = filters.planId;
+  }
+
+  // Filter by plan name
+  if (filters.plan) {
+    where.plan = {
+      isDeleted: false,
+      name: { equals: filters.plan, mode: "insensitive" },
     };
+  }
 
-    // Search filter (user name / email)
-    if (filters.search) {
-        where.OR = [
-            { user: { email: { contains: filters.search, mode: "insensitive" } } },
-            { user: { firstName: { contains: filters.search, mode: "insensitive" } } },
-            { user: { lastName: { contains: filters.search, mode: "insensitive" } } },
-            { plan: { name: { contains: filters.search, mode: "insensitive" } } },
-        ];
+  // Filter by status at database level
+  if (filters.status) {
+    if (filters.status === "ACTIVE") {
+      // ACTIVE: has stripeSubscriptionId AND endDate > now
+      where.stripeSubscriptionId = { not: null };
+      where.endDate = { gt: now };
+    } else if (filters.status === "CANCELED") {
+      // CANCELED: no stripeSubscriptionId
+      where.stripeSubscriptionId = null;
+    } else if (filters.status === "EXPIRED") {
+      // EXPIRED: has stripeSubscriptionId BUT endDate <= now
+      where.stripeSubscriptionId = { not: null };
+      where.endDate = { lte: now };
     }
+  }
 
-    // Filter by plan ID
-    if (filters.planId) {
-        where.planId = filters.planId;
+  // Filter by start date range
+  if (filters.startDateFrom || filters.startDateTo) {
+    where.startDate = {};
+    if (filters.startDateFrom) {
+      where.startDate.gte = filters.startDateFrom;
     }
-
-    // Filter by plan name
-    if (filters.plan) {
-        where.plan = {
-            isDeleted: false,
-            name: { equals: filters.plan, mode: "insensitive" },
-        };
+    if (filters.startDateTo) {
+      const endOfDay = new Date(filters.startDateTo);
+      endOfDay.setHours(23, 59, 59, 999);
+      where.startDate.lte = endOfDay;
     }
+  }
 
-    // Filter by status at database level
-    if (filters.status) {
-        if (filters.status === "ACTIVE") {
-            // ACTIVE: has stripeSubscriptionId AND endDate > now
-            where.stripeSubscriptionId = { not: null };
-            where.endDate = { gt: now };
-        } else if (filters.status === "CANCELED") {
-            // CANCELED: no stripeSubscriptionId
-            where.stripeSubscriptionId = null;
-        } else if (filters.status === "EXPIRED") {
-            // EXPIRED: has stripeSubscriptionId BUT endDate <= now
-            where.stripeSubscriptionId = { not: null };
-            where.endDate = { lte: now };
-        }
-    }
-
-    // Filter by start date range
-    if (filters.startDateFrom || filters.startDateTo) {
-        where.startDate = {};
-        if (filters.startDateFrom) {
-            where.startDate.gte = filters.startDateFrom;
-        }
-        if (filters.startDateTo) {
-            const endOfDay = new Date(filters.startDateTo);
-            endOfDay.setHours(23, 59, 59, 999);
-            where.startDate.lte = endOfDay;
-        }
-    }
-
-    return where;
+  return where;
 };
 
 /**
  * Get subscription include clause for queries
  */
 export const getSubscriptionInclude = () => ({
-    user: {
-        select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phoneNo: true,
-            stripeCustomerId: true,
-            createdAt: true
-        },
+  user: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phoneNo: true,
+      stripeCustomerId: true,
+      createdAt: true
     },
-    plan: {
+  },
+  plan: {
+    select: {
+      id: true,
+      name: true,
+      price: true,
+      duration: true,
+      description: true,
+      features: {
+        where: { isDeleted: false },
         select: {
-            id: true,
-            name: true,
-            price: true,
-            duration: true,
-            description: true,
-            features: {
-                where: { isDeleted: false },
-                select: {
-                    id: true,
-                    name: true,
-                    description: true,
-                },
-            },
+          id: true,
+          name: true,
+          description: true,
         },
+      },
     },
-    payment: {
-        select: {
-            amount: true,
-            paymentMethod: true,
-            stripePaymentId: true,
-            createdAt: true,
-            status: true
-        },
+  },
+  payment: {
+    select: {
+      amount: true,
+      paymentMethod: true,
+      stripePaymentId: true,
+      createdAt: true,
+      status: true
     },
+  },
 });
 
 const buildOrderBy = (sortBy: string, sortOrder: "asc" | "desc") => {
-    if (sortBy.includes(".")) {
-        const parts = sortBy.split("."); // e.g., ["user", "email"]
-        return { [parts[0]]: { [parts[1]]: sortOrder } };
-    }
-    return { [sortBy]: sortOrder };
+  if (sortBy.includes(".")) {
+    const parts = sortBy.split("."); // e.g., ["user", "email"]
+    return { [parts[0]]: { [parts[1]]: sortOrder } };
+  }
+  return { [sortBy]: sortOrder };
 };
 
 
@@ -222,79 +222,84 @@ const buildOrderBy = (sortBy: string, sortOrder: "asc" | "desc") => {
  * Get all subscriptions with filters and pagination
  */
 export const getAllSubscriptions = async (
-    filters: SubscriptionFilters,
-    pagination: { page: number; limit: number },
+  filters: SubscriptionFilters,
+  pagination: { page: number; limit: number },
 ) => {
 
-    console.log('filters ', filters)
+  const skip = (pagination.page - 1) * pagination.limit;
+  const where = buildSubscriptionWhereClause(filters);
 
+  // const orderBy: Prisma.UserSubscriptionOrderByWithRelationInput = {
+  //     [filters.sortBy]: filters.sortOrder,
+  // } as Prisma.UserSubscriptionOrderByWithRelationInput;
 
-    const skip = (pagination.page - 1) * pagination.limit;
-    const where = buildSubscriptionWhereClause(filters);
+  const orderBy = buildOrderBy(filters.sortBy, filters.sortOrder);
 
-    // const orderBy: Prisma.UserSubscriptionOrderByWithRelationInput = {
-    //     [filters.sortBy]: filters.sortOrder,
-    // } as Prisma.UserSubscriptionOrderByWithRelationInput;
+  const [subscriptions, total] = await Promise.all([
+    prisma.userSubscription.findMany({
+      where,
+      include: getSubscriptionInclude(),
+      skip,
+      take: pagination.limit,
+      orderBy,
+    }),
+    prisma.userSubscription.count({ where }),
+  ]);
 
-    const orderBy = buildOrderBy(filters.sortBy, filters.sortOrder);
-
-
-    console.log('orderBy', orderBy)
-
-    const [subscriptions, total] = await Promise.all([
-        prisma.userSubscription.findMany({
-            where,
-            include: getSubscriptionInclude(),
-            skip,
-            take: pagination.limit,
-            orderBy,
-        }),
-        prisma.userSubscription.count({ where }),
-    ]);
-
-    return {
-        subscriptions: subscriptions.map(formatSubscription),
-        total,
-        page: pagination.page,
-        limit: pagination.limit,
-        totalPages: Math.ceil(total / pagination.limit),
-    };
+  return {
+    subscriptions: subscriptions.map(formatSubscription),
+    total,
+    page: pagination.page,
+    limit: pagination.limit,
+    totalPages: Math.ceil(total / pagination.limit),
+  };
 };
 
 /**
  * Get subscription by ID
  */
 export const getSubscriptionById = async (subscriptionId: number) => {
-    const subscription = await prisma.userSubscription.findFirst({
-        where: {
-            id: subscriptionId,
-            isDeleted: false,
-        },
-        include: getSubscriptionInclude(),
-    });
+  const subscription = await prisma.userSubscription.findFirst({
+    where: {
+      id: subscriptionId,
+      isDeleted: false,
+    },
+    include: getSubscriptionInclude(),
+  });
 
-    if (!subscription) {
-        return null;
-    }
+  if (!subscription) {
+    return null;
+  }
 
-    return formatSubscription(subscription);
+  return formatSubscription(subscription);
 };
-
 
 const calculateGrowth = (current: number, previous: number): number => {
-  if (previous === 0) return 100;
-  return Number((((current - previous) / previous) * 100).toFixed(1));
+  if (previous === 0 && current === 0) return 0;
+
+  if (previous === 0 && current > 0) return 100;
+
+  if (previous > 0 && current === 0) return 0;
+
+  const growth = ((current - previous) / previous) * 100;
+
+  // Safety net
+  if (!isFinite(growth)) return 0;
+
+  return Math.round(growth);
 };
+
 
 export const getSubscriptionDashboardStats = async () => {
   const now = new Date();
 
-  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const liveMonthStart = getLiveMonthStart(now);
+  const previousLiveMonthStart = getLiveMonthStart(liveMonthStart);
 
   /* =======================
      AGGREGATES
   ======================== */
+
 
   const [
     totalRevenue,
@@ -315,7 +320,10 @@ export const getSubscriptionDashboardStats = async () => {
       where: {
         status: "SUCCESS",
         isDeleted: false,
-        createdAt: { gte: startOfThisMonth }
+        createdAt: {
+          gte: liveMonthStart,
+          lte: now
+        }
       }
     }),
 
@@ -324,7 +332,7 @@ export const getSubscriptionDashboardStats = async () => {
       where: {
         status: "SUCCESS",
         isDeleted: false,
-        createdAt: { gte: startOfLastMonth, lte: startOfThisMonth }
+        createdAt: { gte: previousLiveMonthStart, lte: liveMonthStart }
       }
     }),
 
@@ -340,36 +348,35 @@ export const getSubscriptionDashboardStats = async () => {
       where: {
         status: "ACTIVE",
         isDeleted: false,
-        createdAt: { lte: startOfThisMonth }
+        createdAt: { lte: liveMonthStart }
       }
     })
   ]);
-
   /* =======================
      CHART DATA
   ======================== */
 
   // Revenue (last 5 months)
-  const revenueChartData = await getMonthlyRevenueChart(5);
+  const revenueChartData = await getMonthlyRevenueChart();
 
   // Active subscriptions trend
   const subscriptionsChartData = await getSubscriptionsTrend(5);
 
   // Monthly revenue (weekly)
-  const monthlyRevenueChartData = await getWeeklyRevenueChart(startOfThisMonth);
+  const monthlyRevenueChartData = await getWeeklyRevenueChart(liveMonthStart);
 
   /* =======================
      FINAL RESPONSE
   ======================== */
 
-const [activePlans, totalPlans] = await Promise.all([
-  prisma.subscriptionPlan.count({
-    where: { isActive: true, isDeleted:false },
-  }),
-  prisma.subscriptionPlan.count({
-    where: {isDeleted: false}
-  }),
-])
+  const [activePlans, totalPlans] = await Promise.all([
+    prisma.subscriptionPlan.count({
+      where: { isActive: true, isDeleted: false },
+    }),
+    prisma.subscriptionPlan.count({
+      where: { isDeleted: false }
+    }),
+  ])
 
 
   return {
@@ -408,69 +415,108 @@ const [activePlans, totalPlans] = await Promise.all([
 
 
 
-const getMonthlyRevenueChart = async (months: number) => {
+const getMonthlyRevenueChart = async () => {
   const now = new Date();
   const data = [];
 
-  for (let i = months - 1; i >= 0; i--) {
-    const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+  let periodEnd = now;
 
-    const revenue = await prisma.payment.aggregate({
-      _sum: { amount: true },
-      where: {
-        status: "SUCCESS",
-        createdAt: { gte: start, lte: end }
-      }
-    });
+  for (let block = 0; block < 4; block++) {
+    let blockRevenue = 0;
+    let blockStart: Date | null = null;
+    let blockEnd: Date | null = null;
 
-    data.push({
-      label: start.toLocaleString("default", { month: "short" }),
-      value: revenue._sum.amount || 0
+    for (let m = 0; m < 3; m++) {
+      const periodStart = getLiveMonthStart(periodEnd);
+
+      const revenue = await prisma.payment.aggregate({
+        _sum: { amount: true },
+        where: {
+          status: "SUCCESS",
+          createdAt: {
+            gte: periodStart,
+            lt: periodEnd
+          }
+        }
+      });
+
+      blockRevenue += revenue._sum.amount || 0;
+
+      blockStart = periodStart;
+      blockEnd ??= periodEnd;
+
+      periodEnd = periodStart;
+    }
+
+    data.unshift({
+      label: `${blockStart!.toLocaleString("default", { month: "short" })} - ${blockEnd!.toLocaleString("default", { month: "short" })}`,
+      value: blockRevenue
     });
   }
 
   return data;
 };
-
 const getSubscriptionsTrend = async (months: number) => {
   const now = new Date();
   const data = [];
 
-  for (let i = months - 1; i >= 0; i--) {
-    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+  let periodEnd = now;
+
+  for (let i = 0; i < months; i++) {
+    const periodStart = getLiveMonthStart(periodEnd);
+
 
     const count = await prisma.userSubscription.count({
       where: {
         status: "ACTIVE",
-        createdAt: { lte: end }
+        createdAt: { lte: periodEnd }
       }
     });
 
     data.push({
-      label: end.toLocaleString("default", { month: "short" }),
+      label: periodStart.toLocaleString("default", { month: "short" }),
       value: count
     });
+    periodEnd = periodStart;
+
   }
 
   return data;
 };
 
+const getLiveMonthStart = (date: Date) => {
+  const start = new Date(date);
+  const day = start.getDate();
+
+  start.setMonth(start.getMonth() - 1);
+
+  if (start.getDate() !== day) {
+    start.setDate(0);
+  }
+
+  return start;
+};
+
+
 const getWeeklyRevenueChart = async (monthStart: Date) => {
   const data = [];
+  const now = new Date();
 
-  for (let week = 0; week <= 4; week++) {
-    const start = new Date(monthStart);
-    start.setDate(1 + week * 7);
+  let weekStart = new Date(monthStart);
 
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
+  for (let week = 0; week < 5; week++) {
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    if (weekEnd > now) {
+      weekEnd.setTime(now.getTime());
+    }
 
     const revenue = await prisma.payment.aggregate({
       _sum: { amount: true },
       where: {
         status: "SUCCESS",
-        createdAt: { gte: start, lte: end }
+        createdAt: { gte: weekStart, lte: weekEnd }
       }
     });
 
@@ -478,7 +524,59 @@ const getWeeklyRevenueChart = async (monthStart: Date) => {
       label: `Week ${week + 1}`,
       value: revenue._sum.amount || 0
     });
+    weekStart = new Date(weekEnd);
+    weekStart.setDate(weekStart.getDate() + 1);
+
+    if (weekStart > now) break;
   }
 
   return data;
+};
+
+// Create stripe checkout session
+export const createStripeCheckoutSession = async ({
+  planId,
+  userEmail,
+  userId,
+  successUrl,
+  cancelUrl,
+}: {
+  planId: number;
+  userEmail: string;
+  userId: number;
+  successUrl: string;
+  cancelUrl: string;
+}) => {
+  try {
+    // 1. Get plan from database
+    const plan = await prisma.subscriptionPlan.findUnique({
+      where: { id: planId },
+    });
+    if (!plan) throw new Error("Subscription plan not found");
+
+    if (!plan.stripePriceId) throw new Error("Stripe price not configured for this plan");
+
+    // 2. Create Stripe Checkout Session
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card","paypal"],
+      customer_email: userEmail,
+      line_items: [
+        {
+          price: plan.stripePriceId,
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        userId: userId.toString(),
+        planId: planId.toString(),
+      },
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    });
+
+    return session;
+  } catch (error) {
+    throw error;
+  }
 };

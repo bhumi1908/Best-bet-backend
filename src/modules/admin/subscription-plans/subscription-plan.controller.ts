@@ -266,7 +266,6 @@ export const createPlan = async (req: Request, res: Response) => {
 
 //  UPDATE SUBSCRIPTION PLAN
 export const updatePlan = async (req: Request, res: Response) => {
-  console.log('Hello');
   let stripePriceId: string | null = null;
   let stripeProductId: string | null = null;
   let newStripePriceCreated = false;
@@ -289,8 +288,6 @@ export const updatePlan = async (req: Request, res: Response) => {
       features = []
     } = req.body;
 
-    console.log('discountPercent', discountPercent)
-    
     if (discountPercent < 0 || discountPercent > 100) {
       return sendError(
         res,
@@ -314,8 +311,6 @@ export const updatePlan = async (req: Request, res: Response) => {
         NOT: { id: planId },
       },
     });
-
-    console.log('existingNameConflict', existingNameConflict)
 
     if (existingNameConflict) {
       return sendError(
@@ -426,8 +421,7 @@ export const updatePlan = async (req: Request, res: Response) => {
         },
       },
     });
-    console.log('updatedPlan', updatedPlan)
-
+    
     sendSuccess(
       res,
       { plan: updatedPlan },

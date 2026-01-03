@@ -21,7 +21,6 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password, firstName, lastName, phoneNo, role } = req.body;
-    console.log('req.body', req.body)
 
     // Validate input
     if (!email || !password || !firstName || !lastName || !phoneNo) {
