@@ -1,46 +1,109 @@
 import { Request, Response } from "express";
 import { sendError, sendSuccess } from "../../utils/helpers";
 import { HttpStatus } from "../../utils/constants/enums";
-import { SubscriptionStatus } from "../../types/subscription";
+import { Subscription, SubscriptionStatus } from "../../types/subscription";
 import { createStripeCheckoutSession, getAllSubscriptions, getSubscriptionById, getSubscriptionDashboardStats } from "./subscription.service";
 import stripe from "../../config/stripe";
 import prisma from "../../config/prisma";
+import { buildSubscriptionResponse } from "../../utils/mapSubscriptions/buildSubscriptions";
 
 /**
  * Create Stripe Checkout Session
  */
 export const createCheckoutSession = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    const { planId } = req.body;
+    try {
+        const userId = req.user?.id;
+        const { planId } = req.body;
 
-    if (!planId) {
-      return sendError(res, "Plan ID is required", HttpStatus.BAD_REQUEST);
+        if (!planId) {
+            return sendError(res, "Plan ID is required", HttpStatus.BAD_REQUEST);
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user || !user.email) {
+            return sendError(res, "User not found", HttpStatus.NOT_FOUND);
+        }
+
+        const plan = await prisma.subscriptionPlan.findUnique({ where: { id: planId } });
+        if (!plan) {
+            return sendError(res, "Plan not found", HttpStatus.NOT_FOUND);
+        }
+
+        const activeSubscription = await prisma.userSubscription.findFirst({
+            where: {
+                userId,
+                status: "ACTIVE",
+                endDate: { gt: new Date() },
+            },
+            include: { plan: true },
+        });
+
+        if (activeSubscription) {
+            return sendError(
+                res,
+                "You already have an active subscription. Please wait for it to expire or contact support.",
+                HttpStatus.FORBIDDEN
+            );
+        }
+
+        if (plan.trialDays && plan.trialDays > 0) {
+            const previousTrial = await prisma.userSubscription.findFirst({
+                where: { userId, plan: { trialDays: { gt: 0 } } },
+                include: { plan: true },
+            });
+            if (previousTrial) {
+                return sendError(
+                    res,
+                    "You have already used a free trial",
+                    HttpStatus.FORBIDDEN
+                );
+            }
+
+            await prisma.$transaction([
+                prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        isTrial: true,
+                    },
+                }),
+                prisma.userSubscription.create({
+                    data: {
+                        userId: user.id,
+                        planId: plan.id,
+                        status: "TRIAL",
+                        startDate: new Date(),
+                        endDate: new Date(Date.now() + plan.trialDays * 24 * 60 * 60 * 1000),
+                    },
+                }),
+            ]);
+
+
+            return sendSuccess(
+                res,
+                { trialActivated: true, message: "Trial plan activated successfully" },
+                "Trial plan activated",
+                HttpStatus.OK
+            );
+        }
+
+        const session = await createStripeCheckoutSession({
+            planId,
+            userEmail: user.email,
+            userId: user.id,
+            successUrl: `${process.env.FRONTEND_URL}/subscription/success`,
+            cancelUrl: `${process.env.FRONTEND_URL}/subscription/cancel`,
+        });
+
+        return sendSuccess(
+            res,
+            { url: session.url },
+            "Stripe checkout session created successfully",
+            HttpStatus.OK
+        );
+    } catch (error: any) {
+        console.error("Stripe checkout error:", error);
+        return sendError(res, error.message || "Failed to create checkout session", HttpStatus.INTERNAL_SERVER_ERROR);
     }
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.email) {
-      return sendError(res, "User not found", HttpStatus.NOT_FOUND);
-    }
-
-    const session = await createStripeCheckoutSession({
-      planId,
-      userEmail: user.email,
-      userId: user.id,
-      successUrl: `${process.env.FRONTEND_URL}/subscription/success`,
-      cancelUrl: `${process.env.FRONTEND_URL}/subscription/cancel`,
-    });
-
-    return sendSuccess(
-      res,
-      { url: session.url },
-      "Stripe checkout session created successfully",
-      HttpStatus.OK
-    );
-  } catch (error: any) {
-    console.error("Stripe checkout error:", error);
-    return sendError(res, error.message || "Failed to create checkout session", HttpStatus.INTERNAL_SERVER_ERROR);
-  }
 };
 
 
@@ -48,68 +111,68 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
  * Get current authenticated user's subscription
  */
 export const getUserSubscription = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.id; // Auth middleware sets this
-    if (!userId) return sendError(res, "User not authenticated", HttpStatus.UNAUTHORIZED);
+    try {
+        const userId = req.user?.id; // Auth middleware sets this
+        if (!userId) return sendError(res, "User not authenticated", HttpStatus.UNAUTHORIZED);
 
-    // Fetch active subscription
-    const subscription = await prisma.userSubscription.findFirst({
-      where: {
-        userId,
-        isDeleted: false,
-      },
-      include: {
-        plan: {
-            include:{
-                features:true
-            }
-        },   
-        payment: true 
-      },
-      orderBy: {
-        createdAt: "desc", // Get most recent subscription
-      },
-    });
+        // Fetch active subscription
+        const subscription = await prisma.userSubscription.findFirst({
+            where: {
+                userId,
+                isDeleted: false,
+            },
+            include: {
+                plan: {
+                    include: {
+                        features: true
+                    }
+                },
+                payment: true
+            },
+            orderBy: {
+                createdAt: "desc", // Get most recent subscription
+            },
+        });
 
-    if (!subscription) {
-      return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
+        if (!subscription) {
+            return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
+        }
+
+        // Format response
+        const response = {
+            id: subscription.id,
+            status: subscription.status,
+            startDate: subscription.startDate,
+            endDate: subscription.endDate,
+            plan: {
+                id: subscription.plan.id,
+                name: subscription.plan.name,
+                price: subscription.plan.price,
+                duration: subscription.plan.duration,
+                trialDays: subscription.plan.trialDays,
+                description: subscription.plan.description,
+                features: subscription.plan.features.filter(f => !f.isDeleted).map(f => ({
+                    id: f.id,
+                    name: f.name,
+                    description: f.description
+                }))
+            },
+            lastPayment: subscription.payment
+                ? {
+                    id: subscription.payment.id,
+                    amount: subscription.payment.amount,
+                    status: subscription.payment.status,
+                    paymentMethod: subscription.payment.paymentMethod,
+                    createdAt: subscription.payment.createdAt
+                }
+                : null,
+        };
+
+        return sendSuccess(res, response, "User subscription fetched successfully", HttpStatus.OK);
+    } catch (error: any) {
+        console.error("getUserSubscription error:", error);
+        return sendError(res, error.message || "Failed to fetch subscription", HttpStatus.INTERNAL_SERVER_ERROR);
     }
-
-    // Format response
-    const response = {
-      id: subscription.id,
-      status: subscription.status,
-      startDate: subscription.startDate,
-      endDate: subscription.endDate,
-      plan: {
-        id: subscription.plan.id,
-        name: subscription.plan.name,
-        price: subscription.plan.price,
-        duration: subscription.plan.duration,
-        trialDays: subscription.plan.trialDays,
-        description: subscription.plan.description,
-        features: subscription.plan.features.filter(f => !f.isDeleted).map(f => ({
-          id: f.id,
-          name: f.name,
-          description: f.description
-        }))
-      },
-      lastPayment: subscription.payment
-        ? {
-            id: subscription.payment.id,
-            amount: subscription.payment.amount,
-            status: subscription.payment.status,
-            paymentMethod: subscription.payment.paymentMethod,
-            createdAt: subscription.payment.createdAt
-          }
-        : null,
-    };
-
-    return sendSuccess(res, response, "User subscription fetched successfully", HttpStatus.OK);
-  } catch (error: any) {
-    console.error("getUserSubscription error:", error);
-    return sendError(res, error.message || "Failed to fetch subscription", HttpStatus.INTERNAL_SERVER_ERROR);
-  }
 };
 
 
@@ -243,13 +306,21 @@ export const revokeUserSubscriptionAdmin = async (req: Request, res: Response) =
         const { userId } = req.params;
 
         const subscription = await prisma.userSubscription.findFirst({
-            where: { userId: parseInt(userId), status: "ACTIVE" },
-            include: { plan: true },
+            where: { userId: parseInt(userId), status: { in: ["ACTIVE", "TRIAL"], } },
+            include: { plan: true, payment: true, },
+            orderBy: { createdAt: "desc" },
+
         });
 
         if (!subscription) return sendError(res, "Active subscription not found", 404);
 
-        if (subscription.stripeSubscriptionId) {
+        if (subscription.status === "TRIAL" && subscription.payment) {
+            await prisma.payment.delete({
+                where: { id: subscription.payment.id },
+            });
+        }
+
+        if (subscription.status === "ACTIVE" && subscription.stripeSubscriptionId) {
             // Cancel in Stripe immediately
             await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
         }
@@ -259,6 +330,7 @@ export const revokeUserSubscriptionAdmin = async (req: Request, res: Response) =
             where: { id: subscription.id },
             data: {
                 status: "CANCELED",
+                endDate: new Date(),
                 updatedAt: new Date(),
             },
         });
@@ -283,7 +355,33 @@ export const refundSubscriptionPaymentAdmin = async (req: Request, res: Response
             reason: reason || "requested_by_customer",
         });
 
-        sendSuccess(res, refund, "Refund processed successfully");
+        const payment = await prisma.payment.findUnique({
+            where: { stripePaymentId: paymentIntentId },
+            include: { subscription: true },
+        });
+
+        if (!payment) return sendError(res, "Payment not found in database", 404);
+
+        const refundRecord = await prisma.refund.create({
+            data: {
+                paymentId: payment.id,
+                userId: payment.userId,
+                amount: Number(amount),
+                status: "SUCCESS",
+                stripeRefundId: refund.id,
+            },
+        });
+
+        if (payment.subscription && payment.subscription.length > 0) {
+            for (const sub of payment.subscription) {
+                await prisma.userSubscription.update({
+                    where: { id: sub.id },
+                    data: { status: "REFUNDED" },
+                });
+            }
+        }
+
+        sendSuccess(res, refundRecord, "Refund processed successfully");
     } catch (error: unknown) {
         sendError(res, error instanceof Error ? error.message : "Failed to process refund", 500);
     }
@@ -291,21 +389,25 @@ export const refundSubscriptionPaymentAdmin = async (req: Request, res: Response
 
 export const changeUserSubscriptionPlan = async (req: Request, res: Response) => {
     try {
+
         const { userId } = req.params;
         const { newPlanId } = req.body;
 
         const userSubscription = await prisma.userSubscription.findFirst({
-            where: { userId: parseInt(userId), status: "ACTIVE" },
+            where: { userId: parseInt(userId), status: { in: ["ACTIVE", "TRIAL"] }, },
             include: { plan: true, user: true },
         });
-        
+
         if (!userSubscription) return sendError(res, "Active subscription not found", 404);
 
         const newPlan = await prisma.subscriptionPlan.findUnique({
             where: { id: newPlanId },
+            include: {
+                features: true,
+            },
         });
 
-        if (!newPlan || !newPlan.stripePriceId)
+        if (!newPlan || !newPlan.stripeProductId)
             return sendError(res, "Invalid new plan", 400);
 
         if (!userSubscription.user.stripeCustomerId) {
@@ -319,25 +421,108 @@ export const changeUserSubscriptionPlan = async (req: Request, res: Response) =>
             });
         }
 
+        const isNewPlanFree = !newPlan.stripePriceId || newPlan.price === 0;
+        const hadStripeSubscription = !!userSubscription.stripeSubscriptionId;
+
+        // ADMIN: FREE → PAID
+        if (hadStripeSubscription && isNewPlanFree) {
+            await stripe.subscriptions.cancel(
+                userSubscription.stripeSubscriptionId!,
+                {
+                    invoice_now: false,
+                    prorate: false,
+                }
+            );
+
+            const updatedSubscription = await prisma.userSubscription.update({
+                where: { id: userSubscription.id },
+                data: {
+                    planId: newPlan.id,
+                    stripeSubscriptionId: null,
+                    status: "TRIAL",
+                    updatedAt: new Date(),
+                },
+                include: {
+                    user: true,
+                    plan: { include: { features: true } },
+                    payment: true,
+                },
+            });
+
+            return sendSuccess(
+                res,
+                buildSubscriptionResponse(updatedSubscription),
+                "User moved to FREE plan successfully"
+            );
+        }
+
+        //  * ADMIN: PAID → PAID
+        if (hadStripeSubscription && !isNewPlanFree) {
+            if (!newPlan.stripePriceId) {
+                return sendError(res, "Invalid paid plan", 400);
+            }
+
+            const stripeSub = await stripe.subscriptions.retrieve(
+                userSubscription.stripeSubscriptionId!
+            );
+
+            await stripe.subscriptions.update(stripeSub.id, {
+                cancel_at_period_end: false,
+                proration_behavior: "always_invoice",
+                items: [
+                    {
+                        id: stripeSub.items.data[0].id,
+                        price: newPlan.stripePriceId,
+                    },
+                ],
+            });
+
+            const updatedSubscription = await prisma.userSubscription.update({
+                where: { id: userSubscription.id },
+                data: {
+                    planId: newPlan.id,
+                    updatedAt: new Date(),
+                },
+                include: {
+                    user: true,
+                    plan: { include: { features: true } },
+                    payment: true,
+                },
+            });
+
+            return sendSuccess(
+                res,
+                buildSubscriptionResponse(updatedSubscription),
+                "Subscription plan changed successfully"
+            );
+        }
+
+        //  * ADMIN: FREE → FREE
         const stripeSubscription = await stripe.subscriptions.create({
-            customer: userSubscription.user.stripeCustomerId,
-            items: [{ price: newPlan.stripePriceId }],
-            expand: ["latest_invoice.payment_intent"],
+            customer: userSubscription.user.stripeCustomerId!,
+            items: [{ price: newPlan.stripePriceId! }],
             payment_behavior: "default_incomplete",
-            trial_period_days: newPlan.trialDays ?? undefined
+            expand: ["latest_invoice.payment_intent"],
+            trial_period_days: newPlan.trialDays ?? undefined,
         });
 
-        await prisma.userSubscription.update({
+
+        const updatedSubscription = await prisma.userSubscription.update({
             where: { id: userSubscription.id },
             data: {
                 planId: newPlan.id,
                 stripeSubscriptionId: stripeSubscription.id,
-                status: "ACTIVE",
                 updatedAt: new Date(),
+                status: "ACTIVE",
+            },
+            include: {
+                user: true,
+                plan: { include: { features: true } },
+                payment: true,
             },
         });
 
-        sendSuccess(res, stripeSubscription, "Subscription plan changed successfully");
+        sendSuccess(res, buildSubscriptionResponse(updatedSubscription), "Subscription plan changed successfully");
     } catch (error: unknown) {
         console.error("Error changing subscription plan:", error);
         sendError(

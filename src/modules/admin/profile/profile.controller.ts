@@ -6,14 +6,14 @@ import bcrypt from "bcryptjs";
 
 const PHONE_REGEX = /^\+?[1-9]\d{0,2}[\s.-]?\(?\d{1,4}\)?([\s.-]?\d{2,4}){2,4}$/
 
-export const changeAdminPassword = async (
+export const changePassword = async (
     req: Request,
     res: Response
 ): Promise<void> => {
     try {
-        const adminId = Number(req.user?.id);
+        const id = Number(req.user?.id);
 
-        if (!adminId || isNaN(adminId)) {
+        if (!id || isNaN(id)) {
             sendError(res, "Unauthorized access", HttpStatus.UNAUTHORIZED);
             return;
         }
@@ -30,7 +30,7 @@ export const changeAdminPassword = async (
         }
 
         const user = await prisma.user.findUnique({
-            where: { id: adminId },
+            where: { id: id },
             select: {
                 id: true,
                 passwordHash: true,
@@ -40,11 +40,6 @@ export const changeAdminPassword = async (
 
         if (!user) {
             sendError(res, "User not found", HttpStatus.NOT_FOUND);
-            return;
-        }
-
-        if (user.role !== "ADMIN") {
-            sendError(res, "Access denied", HttpStatus.FORBIDDEN);
             return;
         }
 
@@ -76,7 +71,7 @@ export const changeAdminPassword = async (
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
         await prisma.user.update({
-            where: { id: adminId },
+            where: { id: id },
             data: {
                 passwordHash: hashedPassword,
             },
@@ -113,7 +108,7 @@ export const changeAdminPassword = async (
     }
 };
 
-export const editAdminProfileDetail = async (
+export const editProfileDetail = async (
     req: Request,
     res: Response
 ): Promise<void> => {

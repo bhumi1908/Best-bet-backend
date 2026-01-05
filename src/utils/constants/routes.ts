@@ -17,7 +17,7 @@ export const API_ROUTES = {
     CREATE: '/api/support/create',
   },
   PROFILE: {
-    ADMINBASE: '/api/admin/profile'
+    ADMINBASE: '/api/profile'
   },
   SUBSCRIPTIONPLAN:{
     ADMINBASE: '/api/admin/subscription-plan',
@@ -35,6 +35,6 @@ export const API_ROUTES = {
     BASE: '/api/stripe'
   },
   HEALTH: '/healthcheck',
-  WEBHOOK: '/webhook'
+  WEBHOOK: '/api/webhook'
 } as const;
 
