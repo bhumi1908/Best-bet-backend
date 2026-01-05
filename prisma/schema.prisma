@@ -46,6 +46,8 @@ model User {
   role         Role    @default(USER)
   refreshToken String?   @map("refresh_token")
     stripeCustomerId       String?   @unique @map("stripe_customer_id")
+
+    isTrial  Boolean     @default(false)
     
   isInactive    Boolean   @default(false) @map("is_inactive")
   forgotHashKey      String?   @unique

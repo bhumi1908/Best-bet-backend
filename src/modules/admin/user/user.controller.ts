@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import prisma from '../../../config/prisma';
 import { sendSuccess, sendError } from '../../../utils/helpers/response';
 import { HttpStatus, UserRole } from '../../../utils/constants/enums';
+import { describe } from 'node:test';
+import { features } from 'process';
 
 // Get All Users
 export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
@@ -160,6 +162,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
                 price: true,
                 duration: true,
                 isRecommended: true,
+                description: true,
               },
             },
             payment: {
@@ -196,14 +199,14 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 
 
     // Subscription age in days
-   const subscriptionAge =
-  activeSubscription?.startDate && activeSubscription?.endDate
-    ? Math.floor(
-        (new Date(activeSubscription.endDate).getTime() -
-          new Date(activeSubscription.startDate).getTime()) /
+    const subscriptionAge =
+      activeSubscription?.startDate && activeSubscription?.endDate
+        ? Math.floor(
+          (new Date(activeSubscription.endDate).getTime() -
+            new Date(activeSubscription.startDate).getTime()) /
           (1000 * 60 * 60 * 24)
-      ) 
-    : 0;
+        )
+        : 0;
 
     const isOnTrial =
       activeSubscription?.status === 'TRIAL' &&
@@ -241,6 +244,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
           price: activeSubscription.plan.price,
           startDate: activeSubscription.startDate,
           endDate: activeSubscription.endDate,
+          description: activeSubscription.plan.description,
           status: activeSubscription.status,
           isOnTrial,
           paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
