@@ -14,6 +14,7 @@ const router = Router();
 router.post(
   "/checkout",
   authRateLimiter,
+  authenticateToken,
   createCheckoutSession
 );
 

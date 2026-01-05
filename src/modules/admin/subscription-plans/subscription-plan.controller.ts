@@ -20,7 +20,7 @@ export const getAllPlansAdmin = async (req: Request, res: Response) => {
         description: true,
         isRecommended: true,
         isActive: true,
-        discountPercent:true,
+        discountPercent: true,
         features: {
           where: {
             isDeleted: false,
@@ -77,7 +77,7 @@ export const getPlanByIdAdmin = async (req: Request, res: Response) => {
         description: true,
         trialDays: true,
         isRecommended: true,
-        discountPercent:true,
+        discountPercent: true,
         isActive: true,
         features: {
           where: {
@@ -135,7 +135,7 @@ export const createPlan = async (req: Request, res: Response) => {
       features = [],
     } = req.body;
 
-        if (discountPercent < 0 || discountPercent > 100) {
+    if (discountPercent < 0 || discountPercent > 100) {
       return sendError(
         res,
         "Discount percent must be between 0 and 100",
@@ -155,22 +155,26 @@ export const createPlan = async (req: Request, res: Response) => {
         HttpStatus.CONFLICT
       );
     }
-     const finalPrice =
+    const finalPrice =
       price && discountPercent
         ? price - (price * discountPercent) / 100
         : price;
+    const isFreePlan = finalPrice === 0;
 
-    if (!trialDays || trialDays === 0) {
-      const product = await stripe.products.create({
-        name,
-        description: description || "",
-        active: isActive,
-         metadata: {
-          discountPercent: String(discountPercent),
-        },
-      });
-      stripeProductId = product.id
 
+    const product = await stripe.products.create({
+      name,
+      description: description || "",
+      active: isActive,
+      metadata: {
+        discountPercent: String(discountPercent),
+        isFreePlan: String(isFreePlan),
+
+      },
+    });
+    stripeProductId = product.id
+
+       if (!isFreePlan && !trialDays) {
       const stripePrice = await stripe.prices.create({
         product: product.id,
         unit_amount: Math.round(finalPrice * 100),
@@ -181,86 +185,88 @@ export const createPlan = async (req: Request, res: Response) => {
         },
         active: isActive,
       });
-      stripePriceId = stripePrice.id
+
+      stripePriceId = stripePrice.id;
     }
+
 
     const plan = await prisma.subscriptionPlan.create({
-      data: {
-        name,
-        price,
-        duration,
-        description,
-        isRecommended,
-        isActive,
-        trialDays,
-        discountPercent,
+    data: {
+      name,
+      price,
+      duration,
+      description,
+      isRecommended,
+      isActive,
+      trialDays,
+      discountPercent,
 
-        stripeProductId,
-        stripePriceId,
+      stripeProductId,
+      stripePriceId,
 
-        features: {
-          create: features.map((f: any) => ({
-            name: f.name,
-            description: f.description,
-          })),
+      features: {
+        create: features.map((f: any) => ({
+          name: f.name,
+          description: f.description,
+        })),
+      },
+    },
+    include: {
+      features: {
+        where: {
+          isDeleted: false,
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
         },
       },
-      include: {
-        features: {
-          where: {
-            isDeleted: false,
-          },
-          select: {
-            id: true,
-            name: true,
-            description: true,
-          },
-        },
-      },
-    });
+    },
+  });
 
-    sendSuccess(
-      res,
-      { plan },
-      "Subscription plan created successfully",
-      HttpStatus.CREATED
-    );
-  } catch (error: any) {
-    console.error("Create plan error:", error);
+  sendSuccess(
+    res,
+    { plan },
+    "Subscription plan created successfully",
+    HttpStatus.CREATED
+  );
+} catch (error: any) {
+  console.error("Create plan error:", error);
 
-    try {
-      if (stripeProductId) {
-        //  Deactivate all prices
-        const prices = await stripe.prices.list({
-          product: stripeProductId,
-          limit: 100,
-        });
+  try {
+    if (stripeProductId) {
+      //  Deactivate all prices
+      const prices = await stripe.prices.list({
+        product: stripeProductId,
+        limit: 100,
+      });
 
-        for (const price of prices.data) {
-          if (price.active) {
-            await stripe.prices.update(price.id, { active: false });
-          }
+      for (const price of prices.data) {
+        if (price.active) {
+          await stripe.prices.update(price.id, { active: false });
         }
-
-        // Deactivate product
-        await stripe.products.update(stripeProductId, {
-          active: false,
-          metadata: {
-            orphaned: "true",
-            rollback_reason: "db_failed",
-          },
-        });
       }
-    } catch (stripeError) {
-      console.error("Stripe rollback failed:", stripeError);
-    }
 
-    return sendError(
-      res,
-      error?.message || "Failed to create subscription plan",
-      HttpStatus.INTERNAL_SERVER_ERROR
-    );
+      // Deactivate product
+      await stripe.products.update(stripeProductId, {
+        active: false,
+        metadata: {
+          orphaned: "true",
+          rollback_reason: "db_failed",
+        },
+      });
+    }
+  } catch (stripeError) {
+    console.error("Stripe rollback failed:", stripeError);
   }
+
+  return sendError(
+    res,
+    error?.message || "Failed to create subscription plan",
+    HttpStatus.INTERNAL_SERVER_ERROR
+  );
+}
 
 };
 
@@ -304,28 +310,14 @@ export const updatePlan = async (req: Request, res: Response) => {
       return sendError(res, "Subscription plan not found", HttpStatus.NOT_FOUND);
     }
 
-    const existingNameConflict = await prisma.subscriptionPlan.findFirst({
-      where: {
-        name,
-        isDeleted: false,
-        NOT: { id: planId },
-      },
-    });
 
-    if (existingNameConflict) {
-      return sendError(
-        res,
-        "Another active subscription plan with this name already exists",
-        HttpStatus.CONFLICT
-      );
-    }
 
-       const finalPrice =
+    const finalPrice =
       price && discountPercent
         ? price - (price * discountPercent) / 100
         : price;
+    const isFreePlan = finalPrice === 0;
 
-    if (!trialDays || trialDays === 0) {
       if (plan.stripeProductId) {
         await stripe.products.update(plan.stripeProductId, {
           name,
@@ -333,20 +325,24 @@ export const updatePlan = async (req: Request, res: Response) => {
           active: isActive,
           metadata: {
             discountPercent: String(discountPercent),
+            isFreePlan: String(isFreePlan),
           },
         });
+      stripeProductId = plan.stripeProductId;
       }
-      stripePriceId = plan.stripePriceId;
 
-        const priceChanged =
+        if (!isFreePlan && !trialDays) {
+      const priceChanged =
         price !== plan.price ||
         duration !== plan.duration ||
-        discountPercent !== plan.discountPercent;
+        discountPercent !== plan.discountPercent ||
+        !plan.stripePriceId;
 
-       if (priceChanged) {
+
+      if (priceChanged) {
         const newPrice = await stripe.prices.create({
           product: plan.stripeProductId!,
-          unit_amount: Math.round(finalPrice * 100), 
+          unit_amount: Math.round(finalPrice * 100),
           currency: "usd",
           recurring: {
             interval: "month",
@@ -358,8 +354,13 @@ export const updatePlan = async (req: Request, res: Response) => {
         stripePriceId = newPrice.id;
         newStripePriceCreated = true;
       }
-      stripeProductId = plan.stripeProductId
+       else {
+        stripePriceId = plan.stripePriceId;
+      }
+    }else {
+      stripePriceId = null;
     }
+    
 
     const incomingIds = features.filter((f: any) => f.id).map((f: any) => f.id);
 
@@ -421,7 +422,7 @@ export const updatePlan = async (req: Request, res: Response) => {
         },
       },
     });
-    
+
     sendSuccess(
       res,
       { plan: updatedPlan },

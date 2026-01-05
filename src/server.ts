@@ -12,6 +12,7 @@ import subscriptionPlanRoutes from './modules/subscription-plans/subscription-pl
 import subscriptionPlanAdminRoutes from './modules/admin/subscription-plans/subscription-plan.routes';
 import subscriptionRoutes from './modules/subscription/subscription.routes'
 import stripeRoutes from './modules/stripe/stripe.routes'
+import webhookRoutes from './webhook/webhook.routes'
 import { API_ROUTES } from './utils/constants/routes';
 
 // Load environment variables
@@ -38,11 +39,12 @@ const corsOptions: CorsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(API_ROUTES.WEBHOOK, express.raw({ type: "application/json" }),webhookRoutes);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
-app.use(rateLimiter);
+// app.use(rateLimiter);
 app.use(cookieParser());
 // API Routes
 app.use(API_ROUTES.AUTH.BASE, authRoutes);
@@ -53,7 +55,6 @@ app.use(API_ROUTES.SUBSCRIPTIONPLAN.BASE, subscriptionPlanRoutes);
 app.use(API_ROUTES.SUBSCRIPTIONPLAN.ADMINBASE, subscriptionPlanAdminRoutes);
 app.use(API_ROUTES.SUBSCRIPTION.BASE, subscriptionRoutes);
 app.use(API_ROUTES.STRIPE.BASE, stripeRoutes);
-// app.use(API_ROUTES.WEBHOOK, webhookRoutes);
 
 // 404 handler
 app.use((req, res) => {

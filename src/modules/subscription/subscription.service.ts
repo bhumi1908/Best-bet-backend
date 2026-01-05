@@ -25,7 +25,7 @@ export const calculateSubscriptionStatus = (
 export const formatSubscription = (
   sub: Prisma.UserSubscriptionGetPayload<{
     include: {
-      user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true } };
+      user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true, isTrial: true } };
       plan: {
         select: {
           id: true;
@@ -33,6 +33,7 @@ export const formatSubscription = (
           price: true;
           duration: true;
           description: true;
+          isActive: true
           features: {
             select: { id: true; name: true; description: true };
           };
@@ -50,7 +51,6 @@ export const formatSubscription = (
     };
   }>
 ): Subscription => {
-  const status = calculateSubscriptionStatus(sub.stripeSubscriptionId, sub.endDate);
 
   return {
     subscriptionId: sub.id,
@@ -60,7 +60,8 @@ export const formatSubscription = (
       email: sub.user.email,
       phoneNo: sub.user.phoneNo,
       stripeCustomerId: sub.user.stripeCustomerId,
-      createdAt: sub.user.createdAt
+      createdAt: sub.user.createdAt,
+      isTrial: sub.user.isTrial,
     },
     plan: {
       id: sub.plan.id,
@@ -69,6 +70,7 @@ export const formatSubscription = (
       duration: sub.plan.duration ?? 0,
       description: sub.plan.description,
       features: sub.plan.features,
+      isActive: sub.plan.isActive
     },
     payment: sub.payment
       ? {
@@ -84,6 +86,7 @@ export const formatSubscription = (
     startDate: sub.startDate.toISOString(),
     endDate: sub.endDate.toISOString(),
     createdAt: sub.createdAt.toISOString(),
+
   };
 };
 
@@ -134,19 +137,39 @@ export const buildSubscriptionWhereClause = (
     };
   }
 
-  // Filter by status at database level
   if (filters.status) {
-    if (filters.status === "ACTIVE") {
-      // ACTIVE: has stripeSubscriptionId AND endDate > now
-      where.stripeSubscriptionId = { not: null };
-      where.endDate = { gt: now };
-    } else if (filters.status === "CANCELED") {
-      // CANCELED: no stripeSubscriptionId
-      where.stripeSubscriptionId = null;
-    } else if (filters.status === "EXPIRED") {
-      // EXPIRED: has stripeSubscriptionId BUT endDate <= now
-      where.stripeSubscriptionId = { not: null };
-      where.endDate = { lte: now };
+    switch (filters.status) {
+      case "ACTIVE":
+        where.stripeSubscriptionId = { not: null };
+        where.endDate = { gt: now };
+        break;
+
+      case "CANCELED":
+        where.stripeSubscriptionId = null;
+        break;
+
+      case "EXPIRED":
+        where.stripeSubscriptionId = { not: null };
+        where.endDate = { lte: now };
+        break;
+
+      case "TRIAL":
+        where.stripeSubscriptionId = null;
+        where.endDate = { gt: now };
+        where.plan = {
+          trialDays: {
+            gt: 0,
+          },
+        };
+        break;
+
+      case "REFUNDED":
+        where.payment = {
+          refund: {
+            isNot: null,
+          },
+        };
+        break;
     }
   }
 
@@ -178,7 +201,8 @@ export const getSubscriptionInclude = () => ({
       email: true,
       phoneNo: true,
       stripeCustomerId: true,
-      createdAt: true
+      createdAt: true,
+      isTrial: true
     },
   },
   plan: {
@@ -188,6 +212,7 @@ export const getSubscriptionInclude = () => ({
       price: true,
       duration: true,
       description: true,
+      isActive: true,
       features: {
         where: { isDeleted: false },
         select: {
@@ -266,6 +291,7 @@ export const getSubscriptionById = async (subscriptionId: number) => {
     },
     include: getSubscriptionInclude(),
   });
+
 
   if (!subscription) {
     return null;
@@ -559,7 +585,7 @@ export const createStripeCheckoutSession = async ({
     // 2. Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      payment_method_types: ["card","paypal"],
+      payment_method_types: ["card", "paypal"],
       customer_email: userEmail,
       line_items: [
         {
@@ -570,6 +596,11 @@ export const createStripeCheckoutSession = async ({
       metadata: {
         userId: userId.toString(),
         planId: planId.toString(),
+      },
+      subscription_data: {
+        metadata: {
+          userId: userId.toString(),
+        },
       },
       success_url: successUrl,
       cancel_url: cancelUrl,
