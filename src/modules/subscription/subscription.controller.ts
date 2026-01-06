@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { sendError, sendSuccess } from "../../utils/helpers";
 import { HttpStatus } from "../../utils/constants/enums";
 import { Subscription, SubscriptionStatus } from "../../types/subscription";
-import { createStripeCheckoutSession, getAllSubscriptions, getSubscriptionById, getSubscriptionDashboardStats } from "./subscription.service";
+import { activateFreeOrTrialPlan, createStripeCheckoutSession, getActiveSubscriptionForUser, getAllSubscriptions, getSubscriptionById, getSubscriptionDashboardStats, hasUsedFreePlan, isFreePlan } from "./subscription.service";
 import stripe from "../../config/stripe";
 import prisma from "../../config/prisma";
 import { buildSubscriptionResponse } from "../../utils/mapSubscriptions/buildSubscriptions";
@@ -24,21 +24,16 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
             return sendError(res, "User not found", HttpStatus.NOT_FOUND);
         }
 
-        const plan = await prisma.subscriptionPlan.findUnique({ where: { id: planId } });
+        const plan = await prisma.subscriptionPlan.findUnique({ where: { id: planId, isDeleted: false } });
         if (!plan) {
             return sendError(res, "Plan not found", HttpStatus.NOT_FOUND);
         }
-
-        const activeSubscription = await prisma.userSubscription.findFirst({
-            where: {
-                userId,
-                status: "ACTIVE",
-                endDate: { gt: new Date() },
-            },
-            include: { plan: true },
-        });
-
-        if (activeSubscription) {
+        if (!plan.isActive) {
+            return sendError(res, "Plan is inactive", HttpStatus.BAD_REQUEST);
+        }
+        const activeSubscription = await getActiveSubscriptionForUser(userId!);
+        console.log('activeSubscription && !hasUsedFreePlan(user)', activeSubscription && !hasUsedFreePlan(user))
+        if (activeSubscription && !hasUsedFreePlan(user)) {
             return sendError(
                 res,
                 "You already have an active subscription. Please wait for it to expire or contact support.",
@@ -46,42 +41,17 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
             );
         }
 
-        if (plan.trialDays && plan.trialDays > 0) {
-            const previousTrial = await prisma.userSubscription.findFirst({
-                where: { userId, plan: { trialDays: { gt: 0 } } },
-                include: { plan: true },
-            });
-            if (previousTrial) {
-                return sendError(
-                    res,
-                    "You have already used a free trial",
-                    HttpStatus.FORBIDDEN
-                );
+        if (isFreePlan(plan)) {
+            if (hasUsedFreePlan(user)) {
+                return sendError(res, "Free plan already used", HttpStatus.FORBIDDEN);
             }
 
-            await prisma.$transaction([
-                prisma.user.update({
-                    where: { id: user.id },
-                    data: {
-                        isTrial: true,
-                    },
-                }),
-                prisma.userSubscription.create({
-                    data: {
-                        userId: user.id,
-                        planId: plan.id,
-                        status: "TRIAL",
-                        startDate: new Date(),
-                        endDate: new Date(Date.now() + plan.trialDays * 24 * 60 * 60 * 1000),
-                    },
-                }),
-            ]);
-
+            await activateFreeOrTrialPlan({ userId: user.id, plan });
 
             return sendSuccess(
                 res,
-                { trialActivated: true, message: "Trial plan activated successfully" },
-                "Trial plan activated",
+                { trialActivated: true, message: "Free/Trial plan activated successfully" },
+                "Free/Trial plan activated",
                 HttpStatus.OK
             );
         }
@@ -135,6 +105,14 @@ export const getUserSubscription = async (req: Request, res: Response) => {
         });
 
         if (!subscription) {
+            return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
+        }
+
+        if (subscription.endDate <= new Date() && subscription.status !== "EXPIRED") {
+            await prisma.userSubscription.update({
+                where: { id: subscription.id },
+                data: { status: "EXPIRED", updatedAt: new Date() },
+            });
             return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
         }
 
@@ -407,11 +385,25 @@ export const changeUserSubscriptionPlan = async (req: Request, res: Response) =>
             },
         });
 
-        if (!newPlan || !newPlan.stripeProductId)
+        if (!newPlan || newPlan.isDeleted)
             return sendError(res, "Invalid new plan", 400);
+
+        if (!newPlan.isActive) {
+            return sendError(res, "Plan is inactive", 400);
+        }
 
         if (!userSubscription.user.stripeCustomerId) {
             return sendError(res, "User does not have a Stripe customer ID", 400);
+        }
+
+        if (isFreePlan(newPlan) && hasUsedFreePlan(userSubscription.user)) {
+            return sendError(res, "Free plan already used", 403);
+        }
+
+        const now = new Date();
+        const hasRunningPaid = userSubscription.stripeSubscriptionId && userSubscription.endDate > now;
+        if (hasRunningPaid && !isFreePlan(userSubscription.plan)) {
+            return sendError(res, "Plan change will start after current period. Please retry after expiry or cancel at period end.", 400);
         }
 
         if (userSubscription.stripeSubscriptionId) {
@@ -421,10 +413,10 @@ export const changeUserSubscriptionPlan = async (req: Request, res: Response) =>
             });
         }
 
-        const isNewPlanFree = !newPlan.stripePriceId || newPlan.price === 0;
+        const isNewPlanFree = isFreePlan(newPlan);
         const hadStripeSubscription = !!userSubscription.stripeSubscriptionId;
 
-        // ADMIN: FREE → PAID
+        // ADMIN: PAID → FREE
         if (hadStripeSubscription && isNewPlanFree) {
             await stripe.subscriptions.cancel(
                 userSubscription.stripeSubscriptionId!,
