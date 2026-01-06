@@ -141,6 +141,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         firstName: true,
         lastName: true,
         phoneNo: true,
+        isTrial: true,
         role: true,
         isInactive: true,
         createdAt: true,
@@ -163,6 +164,13 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
                 duration: true,
                 isRecommended: true,
                 description: true,
+                features:{
+                  select:{
+                    id: true,
+                    name: true,
+                    description: true
+                  }
+                }
               },
             },
             payment: {
@@ -232,6 +240,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      isTrial: user.isTrial,
       phoneNo: user.phoneNo,
       role: user.role,
       isInactive: user.isInactive,
@@ -246,6 +255,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
           endDate: activeSubscription.endDate,
           description: activeSubscription.plan.description,
           status: activeSubscription.status,
+          features: activeSubscription.plan.features,
           isOnTrial,
           paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
         }

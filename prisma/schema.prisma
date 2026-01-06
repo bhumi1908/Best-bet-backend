@@ -114,6 +114,7 @@ model SubscriptionPlan {
 
   features      Feature[]
   subscriptions UserSubscription[]
+  scheduledSubscriptions UserSubscription[] @relation("NextPlan")
 
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
@@ -153,9 +154,13 @@ model UserSubscription {
 
   status                 SubscriptionStatus @default(ACTIVE) 
 
+  nextPlanId             Int?
+  scheduledChangeAt      DateTime?
+
   user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan                   SubscriptionPlan @relation(fields: [planId], references: [id])
   payment                Payment?         @relation(fields: [paymentId], references: [id])
+   nextPlan               SubscriptionPlan?  @relation("NextPlan", fields: [nextPlanId], references: [id])
 
     createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")

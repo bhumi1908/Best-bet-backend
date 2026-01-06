@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from "../../../config/prisma";
-import { HttpStatus } from "../../../utils/constants/enums";
+import { HttpStatus, UserRole } from "../../../utils/constants/enums";
 import { sendError, sendSuccess } from "../../../utils/helpers";
 import bcrypt from "bcryptjs";
 
@@ -12,9 +12,15 @@ export const changePassword = async (
 ): Promise<void> => {
     try {
         const id = Number(req.user?.id);
+        const role = (req.user as any)?.role as UserRole | undefined;
 
         if (!id || isNaN(id)) {
             sendError(res, "Unauthorized access", HttpStatus.UNAUTHORIZED);
+            return;
+        }
+
+        if (!role || ![UserRole.ADMIN, UserRole.USER].includes(role)) {
+            sendError(res, "Unauthorized role", HttpStatus.FORBIDDEN);
             return;
         }
 
@@ -114,9 +120,27 @@ export const editProfileDetail = async (
 ): Promise<void> => {
     try {
         const id = Number(req.params.id);
+        const requesterId = Number(req.user?.id);
+        const requesterRole = (req.user as any)?.role as UserRole | undefined;
 
         if (isNaN(id)) {
             sendError(res, 'Invalid user ID', HttpStatus.BAD_REQUEST);
+            return;
+        }
+
+        if (!requesterRole || ![UserRole.ADMIN, UserRole.USER].includes(requesterRole)) {
+            sendError(res, 'Unauthorized role', HttpStatus.FORBIDDEN);
+            return;
+        }
+
+        if (!requesterId || isNaN(requesterId)) {
+            sendError(res, 'Unauthorized access', HttpStatus.UNAUTHORIZED);
+            return;
+        }
+
+        // Ensure users (including admins) can only edit their own profile
+        if (requesterId !== id) {
+            sendError(res, 'Forbidden: cannot edit another user profile', HttpStatus.FORBIDDEN);
             return;
         }
 
