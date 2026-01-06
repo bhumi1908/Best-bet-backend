@@ -32,7 +32,6 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
             return sendError(res, "Plan is inactive", HttpStatus.BAD_REQUEST);
         }
         const activeSubscription = await getActiveSubscriptionForUser(userId!);
-        console.log('activeSubscription && !hasUsedFreePlan(user)', activeSubscription && !hasUsedFreePlan(user))
         if (activeSubscription && !hasUsedFreePlan(user)) {
             return sendError(
                 res,
