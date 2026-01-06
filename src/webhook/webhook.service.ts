@@ -3,7 +3,7 @@ import prisma from "../config/prisma";
 import stripe from "../config/stripe";
 import { PaymentStatus } from "../generated/prisma/enums";
 
-const resolvePaymentMethod = async (paymentMethod: Stripe.PaymentIntent.PaymentMethod | string | null) => {
+const resolvePaymentMethod = async (paymentMethod: Stripe.PaymentMethod | string | null) => {
   if (!paymentMethod) return "unknown";
 
   if (typeof paymentMethod === "string") {
@@ -104,7 +104,6 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
   }
 
 const paymentMethod = await resolvePaymentMethod(paymentIntent.payment_method);
-console.log('Come-2',paymentMethod);
 
   const payment = await prisma.payment.upsert({
     where: { stripePaymentId: paymentIntentId },
@@ -142,11 +141,6 @@ console.log('Come-2',paymentMethod);
       updatedAt: new Date(),
     },
   });
-
-  console.log('inv.period_start', inv.period_start)
-  console.log('inv.period_start', inv.period_end)
-  console.log('new Date(inv.period_start * 1000)', new Date(inv.period_start * 1000))
-  console.log('new Date(inv.period_end * 1000)', new Date(inv.period_end * 1000))
 
   await prisma.userSubscription.updateMany({
     where: { stripeSubscriptionId },
