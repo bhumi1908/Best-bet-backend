@@ -90,6 +90,94 @@ export const formatSubscription = (
   };
 };
 
+export const getActiveSubscriptionForUser = async (userId: number) => {
+  return prisma.userSubscription.findFirst({
+    where: {
+      userId,
+      isDeleted: false,
+      status: { in: ["ACTIVE"] },
+      endDate: { gt: new Date() },
+    },
+    include: getSubscriptionInclude(),
+    orderBy: { createdAt: "desc" },
+  });
+};
+
+export const markExpiredIfPast = async (subscriptionId: number) => {
+  const subscription = await prisma.userSubscription.findUnique({
+    where: { id: subscriptionId },
+  });
+
+  if (!subscription) return null;
+  if (subscription.endDate <= new Date() && subscription.status !== "EXPIRED") {
+    const updated = await prisma.userSubscription.update({
+      where: { id: subscriptionId },
+      data: { status: "EXPIRED", updatedAt: new Date() },
+      include: getSubscriptionInclude(),
+    });
+    return formatSubscription(updated);
+  }
+
+  return subscription;
+};
+
+export const hasUsedFreePlan = (user: { isTrial?: boolean | null }) => Boolean(user?.isTrial);
+
+export const isFreePlan = (plan: { price: number | null; trialDays: number | null; stripePriceId?: string | null }) => {
+  return (plan.price ?? 0) === 0 || (plan.trialDays ?? 0) > 0 || !plan.stripePriceId;
+};
+
+export const activateFreeOrTrialPlan = async ({
+  userId,
+  plan,
+}: {
+  userId: number;
+  plan: {
+    id: number;
+    duration: number | null;
+    trialDays: number | null;
+    price: number | null;
+  };
+}) => {
+  const startDate = new Date();
+  const endDate = new Date(startDate);
+
+  if (plan.trialDays && plan.trialDays > 0) {
+    endDate.setDate(endDate.getDate() + plan.trialDays);
+  } else if (plan.duration && plan.duration > 0) {
+    endDate.setMonth(endDate.getMonth() + plan.duration);
+  }
+
+  await prisma.userSubscription.create({
+    data: {
+      userId,
+      planId: plan.id,
+      startDate,
+      endDate,
+      status: "TRIAL",
+    },
+  });
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { isTrial: true },
+  });
+
+  return { startDate, endDate };
+};
+
+export const expireDueSubscriptions = async () => {
+  const now = new Date();
+  await prisma.userSubscription.updateMany({
+    where: {
+      isDeleted: false,
+      status: { in: ["ACTIVE", "TRIAL"] },
+      endDate: { lte: now },
+    },
+    data: { status: "EXPIRED", updatedAt: now },
+  });
+};
+
 /**
  * Build WHERE clause for subscription queries
  */
@@ -574,11 +662,21 @@ export const createStripeCheckoutSession = async ({
   cancelUrl: string;
 }) => {
   try {
-    // 1. Get plan from database
+    const active = await getActiveSubscriptionForUser(userId);
+    console.log('active', active)
+    if (active) {
+      throw new Error("An active subscription already exists. Please wait for it to expire or cancel at period end.");
+    }
+
     const plan = await prisma.subscriptionPlan.findUnique({
-      where: { id: planId },
+      where: { id: planId, isDeleted: false },
     });
     if (!plan) throw new Error("Subscription plan not found");
+    if (!plan.isActive) throw new Error("Subscription plan is not active");
+
+    if (isFreePlan(plan)) {
+      throw new Error("Free/trial plan cannot be purchased via checkout");
+    }
 
     if (!plan.stripePriceId) throw new Error("Stripe price not configured for this plan");
 
