@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma';
 import { UserRole } from '../utils/constants/enums';
+import { Role } from '../generated/prisma/enums';
 
 // Extend Express Request type to include user
 declare global {
@@ -10,6 +11,7 @@ declare global {
       user?: {
         id: number;
         email: string;
+        role: Role
       };
     }
   }
@@ -92,6 +94,7 @@ export const authenticateToken = async (
       req.user = {
         id: user.id,
         email: user.email,
+        role: user.role
       };
 
       next();

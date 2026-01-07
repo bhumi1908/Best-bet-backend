@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticateToken } from "../../middleware/auth";
 import { authRateLimiter } from "../../middleware/rateLimiter";
 import { requireAdmin } from "../../middleware/adminAuth";
-import { changeUserSubscriptionPlan, createCheckoutSession, getAllSubscribedUsersAdmin, getSubscriptionDashboardAdmin, getSubscriptionDetailsAdmin, getUserSubscription, refundSubscriptionPaymentAdmin, revokeUserSubscriptionAdmin } from "./subscription.controller";
+import { cancelScheduledPlanChange, changeUserSubscriptionPlan, changeUserSubscriptionPlanSelf, createCheckoutSession, getAllSubscribedUsersAdmin, getSubscriptionDashboardAdmin, getSubscriptionDetailsAdmin, getUserSubscription, refundSubscriptionPaymentAdmin, revokeUserSubscriptionAdmin, revokeUserSubscriptionSelf } from "./subscription.controller";
 
 const router = Router();
 
@@ -22,6 +22,15 @@ router.post(
  * Get current user's subscription details
  */
 router.get("/me/subscription", authenticateToken, getUserSubscription);
+
+// Cancel subscription (at period end)
+router.post("/me/revoke", authenticateToken, revokeUserSubscriptionSelf);
+
+// Change plan
+router.post("/me/change-plan", authenticateToken, changeUserSubscriptionPlanSelf);
+
+// Cancel schedule plan
+router.post("/me/cancel/schedule-plan", authenticateToken, cancelScheduledPlanChange);
 
 /**
  * ===========================
