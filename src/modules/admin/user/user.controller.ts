@@ -127,10 +127,18 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
   try {
     const userId = parseInt(req.params.id);
 
-    if (isNaN(userId)) {
-      sendError(res, 'Invalid user ID', HttpStatus.BAD_REQUEST);
+    const role = (req.user as any)?.role as UserRole | undefined;
+
+    if (!userId || isNaN(userId)) {
+      sendError(res, "Unauthorized access", HttpStatus.UNAUTHORIZED);
       return;
     }
+
+    if (!role || ![UserRole.ADMIN, UserRole.USER].includes(role)) {
+      sendError(res, "Unauthorized role", HttpStatus.FORBIDDEN);
+      return;
+    }
+
 
     // Get user by ID
     const user = await prisma.user.findUnique({
@@ -156,6 +164,9 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
             status: true,
             createdAt: true,
             updatedAt: true,
+            nextPlanId: true,
+            nextPlan: true,
+            scheduledChangeAt: true,
             plan: {
               select: {
                 id: true,
@@ -164,8 +175,8 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
                 duration: true,
                 isRecommended: true,
                 description: true,
-                features:{
-                  select:{
+                features: {
+                  select: {
                     id: true,
                     name: true,
                     description: true
@@ -197,9 +208,9 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Current active subscription (latest with status ACTIVE)
-    const activeSubscription = user.subscriptions.find((sub) => sub.status === 'ACTIVE') ||
-      user.subscriptions.find((sub) => sub.status === 'TRIAL') ||
-      null;
+    const activeSubscription = user.subscriptions.find(sub =>
+      sub.status === 'ACTIVE' || sub.status === 'TRIAL'
+    );
 
     // Total payments
     const totalPaid = user.payments.reduce((acc, p) => acc + p.amount, 0);
@@ -258,6 +269,9 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
           features: activeSubscription.plan.features,
           isOnTrial,
           paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
+          nextPlanName: activeSubscription.nextPlan?.name,
+          scheduledChangeAt: activeSubscription.scheduledChangeAt,
+          isTrial: activeSubscription.status === 'TRIAL'
         }
         : null,
       totalPayments: totalPaid,

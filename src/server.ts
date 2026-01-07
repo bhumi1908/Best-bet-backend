@@ -14,6 +14,7 @@ import subscriptionRoutes from './modules/subscription/subscription.routes'
 import stripeRoutes from './modules/stripe/stripe.routes'
 import webhookRoutes from './webhook/webhook.routes'
 import { API_ROUTES } from './utils/constants/routes';
+import "./cron/subscriptionExpire.cron";
 
 // Load environment variables
 dotenv.config();

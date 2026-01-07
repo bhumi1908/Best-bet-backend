@@ -6,7 +6,7 @@ import { activateFreeOrTrialPlan, createStripeCheckoutSession, getActiveSubscrip
 import stripe from "../../config/stripe";
 import prisma from "../../config/prisma";
 import { buildSubscriptionResponse } from "../../utils/mapSubscriptions/buildSubscriptions";
-
+import { formatDate } from "date-fns";
 /**
  * Create Stripe Checkout Session
  */
@@ -96,10 +96,15 @@ export const getUserSubscription = async (req: Request, res: Response) => {
                         features: true
                     }
                 },
+                nextPlan: {
+                    include: {
+                        features: true
+                    }
+                },
                 payment: true
             },
             orderBy: {
-                createdAt: "desc", // Get most recent subscription
+                createdAt: "desc",
             },
         });
 
@@ -110,7 +115,12 @@ export const getUserSubscription = async (req: Request, res: Response) => {
         if (subscription.endDate <= new Date() && subscription.status !== "EXPIRED") {
             await prisma.userSubscription.update({
                 where: { id: subscription.id },
-                data: { status: "EXPIRED", updatedAt: new Date() },
+                data: {
+                    status: "EXPIRED",
+                    updatedAt: new Date(),
+                    nextPlanId: null,
+                    scheduledChangeAt: null
+                },
             });
             return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
         }
@@ -121,6 +131,9 @@ export const getUserSubscription = async (req: Request, res: Response) => {
             status: subscription.status,
             startDate: subscription.startDate,
             endDate: subscription.endDate,
+            stripeSubscriptionId: subscription.stripeSubscriptionId,
+            nextPlanId: subscription.nextPlanId,
+            scheduledChangeAt: subscription.scheduledChangeAt,
             plan: {
                 id: subscription.plan.id,
                 name: subscription.plan.name,
@@ -128,12 +141,29 @@ export const getUserSubscription = async (req: Request, res: Response) => {
                 duration: subscription.plan.duration,
                 trialDays: subscription.plan.trialDays,
                 description: subscription.plan.description,
-                features: subscription.plan.features.filter(f => !f.isDeleted).map(f => ({
-                    id: f.id,
-                    name: f.name,
-                    description: f.description
-                }))
+                features: subscription.plan.features
+                    .filter(f => !f.isDeleted)
+                    .map(f => ({
+                        id: f.id,
+                        name: f.name,
+                        description: f.description
+                    }))
             },
+            nextPlan: subscription.nextPlan ? {
+                id: subscription.nextPlan.id,
+                name: subscription.nextPlan.name,
+                price: subscription.nextPlan.price,
+                duration: subscription.nextPlan.duration,
+                trialDays: subscription.nextPlan.trialDays,
+                description: subscription.nextPlan.description,
+                features: subscription.nextPlan.features
+                    .filter(f => !f.isDeleted)
+                    .map(f => ({
+                        id: f.id,
+                        name: f.name,
+                        description: f.description
+                    }))
+            } : null,
             lastPayment: subscription.payment
                 ? {
                     id: subscription.payment.id,
@@ -253,7 +283,6 @@ export const getSubscriptionDetailsAdmin = async (
     }
 };
 
-
 export const getSubscriptionDashboardAdmin = async (
     req: Request,
     res: Response
@@ -315,52 +344,6 @@ export const revokeUserSubscriptionAdmin = async (req: Request, res: Response) =
         sendSuccess(res, null, "Subscription revoked successfully");
     } catch (error: unknown) {
         sendError(res, error instanceof Error ? error.message : "Failed to revoke subscription", 500);
-    }
-};
-
-export const refundSubscriptionPaymentAdmin = async (req: Request, res: Response) => {
-    try {
-        const { paymentIntentId } = req.params;
-        const { amount, reason } = req.body;
-
-        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-        if (!paymentIntent) return sendError(res, "Payment not found", 404);
-
-        const refund = await stripe.refunds.create({
-            payment_intent: paymentIntentId,
-            amount: Math.round(Number(amount) * 100),
-            reason: reason || "requested_by_customer",
-        });
-
-        const payment = await prisma.payment.findUnique({
-            where: { stripePaymentId: paymentIntentId },
-            include: { subscription: true },
-        });
-
-        if (!payment) return sendError(res, "Payment not found in database", 404);
-
-        const refundRecord = await prisma.refund.create({
-            data: {
-                paymentId: payment.id,
-                userId: payment.userId,
-                amount: Number(amount),
-                status: "SUCCESS",
-                stripeRefundId: refund.id,
-            },
-        });
-
-        if (payment.subscription && payment.subscription.length > 0) {
-            for (const sub of payment.subscription) {
-                await prisma.userSubscription.update({
-                    where: { id: sub.id },
-                    data: { status: "REFUNDED" },
-                });
-            }
-        }
-
-        sendSuccess(res, refundRecord, "Refund processed successfully");
-    } catch (error: unknown) {
-        sendError(res, error instanceof Error ? error.message : "Failed to process refund", 500);
     }
 };
 
@@ -521,5 +504,348 @@ export const changeUserSubscriptionPlan = async (req: Request, res: Response) =>
             error instanceof Error ? error.message : "Failed to change subscription plan",
             500
         );
+    }
+};
+
+export const refundSubscriptionPaymentAdmin = async (req: Request, res: Response) => {
+    try {
+        const { paymentIntentId } = req.params;
+        const { amount, reason } = req.body;
+
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        if (!paymentIntent) return sendError(res, "Payment not found", 404);
+
+        const refund = await stripe.refunds.create({
+            payment_intent: paymentIntentId,
+            amount: Math.round(Number(amount) * 100),
+            reason: reason || "requested_by_customer",
+        });
+
+        const payment = await prisma.payment.findUnique({
+            where: { stripePaymentId: paymentIntentId },
+            include: { subscription: true },
+        });
+
+        if (!payment) return sendError(res, "Payment not found in database", 404);
+
+        const refundRecord = await prisma.refund.create({
+            data: {
+                paymentId: payment.id,
+                userId: payment.userId,
+                amount: Number(amount),
+                status: "SUCCESS",
+                stripeRefundId: refund.id,
+            },
+        });
+
+        if (payment.subscription && payment.subscription.length > 0) {
+            for (const sub of payment.subscription) {
+                await prisma.userSubscription.update({
+                    where: { id: sub.id },
+                    data: { status: "REFUNDED" },
+                });
+            }
+        }
+
+        sendSuccess(res, refundRecord, "Refund processed successfully");
+    } catch (error: unknown) {
+        sendError(res, error instanceof Error ? error.message : "Failed to process refund", 500);
+    }
+};
+
+
+export const revokeUserSubscriptionSelf = async (req: Request, res: Response) => {
+    try {
+        const userId = req.user?.id;
+
+        const subscription = await prisma.userSubscription.findFirst({
+            where: { userId, status: { in: ["ACTIVE", "TRIAL"] }, isDeleted: false },
+            orderBy: { createdAt: "desc" },
+        });
+
+        if (!subscription?.stripeSubscriptionId) return sendError(res, "Active subscription not found", 404);
+
+        const stripeSub = await stripe.subscriptions.retrieve(
+            subscription.stripeSubscriptionId
+        );
+
+        if (stripeSub.status === "canceled") {
+            await prisma.userSubscription.update({
+                where: { id: subscription.id },
+                data: { status: "CANCELED" },
+            });
+
+            return sendSuccess(res, null, "Subscription already canceled");
+        }
+
+        if (stripeSub.cancel_at_period_end) {
+            await prisma.userSubscription.update({
+                where: { id: subscription.id },
+                data: { status: "CANCELED" },
+            });
+
+            return sendSuccess(res, null, "Subscription already scheduled to cancel");
+        }
+
+
+        // If user has a trial with payment, delete the payment
+        if (subscription.status === "TRIAL" && subscription.paymentId) {
+            await prisma.payment.delete({ where: { id: subscription.paymentId } });
+        }
+
+        // If ACTIVE with Stripe, cancel at period end
+        if (stripeSub.status === "active" && !stripeSub.cancel_at_period_end) {
+            await stripe.subscriptions.update(stripeSub.id, {
+                cancel_at_period_end: true,
+            });
+        }
+
+        // Update subscription in DB
+        const updateSubscriptions = await prisma.userSubscription.update({
+            where: { id: subscription.id },
+            data: {
+                status: "CANCELED",
+                updatedAt: new Date(),
+            },
+        });
+
+        return sendSuccess(res, updateSubscriptions, "Subscription canceled at period end");
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, error instanceof Error ? error.message : "Failed to cancel subscription", 500);
+    }
+};
+
+
+export const changeUserSubscriptionPlanSelf = async (req: Request, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        const { newPlanId } = req.body;
+
+        if (!userId) return sendError(res, "User not authenticated", HttpStatus.UNAUTHORIZED);
+        if (!newPlanId) return sendError(res, "newPlanId is required", HttpStatus.BAD_REQUEST);
+
+        // Get user with all subscriptions to check if they've used a free trial
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                subscriptions: {
+                    where: { isDeleted: false }
+                }
+            }
+        });
+
+        if (!user) {
+            return sendError(res, "User not found", HttpStatus.NOT_FOUND);
+        }
+        // Get the new plan first
+        const newPlan = await prisma.subscriptionPlan.findUnique({
+            where: { id: newPlanId, isDeleted: false }
+        });
+
+        if (!newPlan) {
+            return sendError(res, "Plan not found", HttpStatus.NOT_FOUND);
+        }
+
+        const isFreePlan =
+            (newPlan?.trialDays ?? 0) > 0 || newPlan.price === 0;
+
+        if (isFreePlan) {
+            // Check if user has already used a free/trial plan
+            const userSubscriptions = await prisma.userSubscription.findMany({
+                where: {
+                    userId,
+                    isDeleted: false,
+                    OR: [
+                        { status: 'TRIAL' },
+                        {
+                            plan: {
+                                OR: [
+                                    { trialDays: { gt: 0 } },
+                                    { price: 0 }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                include: {
+                    plan: true
+                }
+            });
+
+            // Check if user has any active or completed free/trial subscription
+            const hasUsedFreePlan = userSubscriptions.some(sub => {
+                // If subscription is TRIAL status
+                if (sub.status === 'TRIAL') return true;
+
+                // If the plan itself is free/trial
+                if ((newPlan?.trialDays ?? 0) > 0 || sub.plan?.price === 0) return true;
+
+                return false;
+            });
+
+            if (hasUsedFreePlan) {
+                return sendError(res, "You have already used a free plan or trial. Please choose a paid plan.", HttpStatus.BAD_REQUEST);
+            }
+        }
+
+        // Get current active subscription
+        const currentSubscription = await prisma.userSubscription.findFirst({
+            where: {
+                userId,
+                isDeleted: false,
+                status: { in: ["ACTIVE", "TRIAL"] }
+            },
+            include: {
+                plan: true,
+                nextPlan: true
+            }
+        });
+
+        if (!currentSubscription) {
+            // If no active subscription, user is subscribing for the first time
+            // For free plans, create subscription immediately
+            if (isFreePlan) {
+                const startDate = new Date();
+                let endDate = new Date(startDate);
+
+                if ((newPlan?.trialDays ?? 0) > 0) {
+                    endDate.setDate(endDate.getDate() + (newPlan?.trialDays ?? 0));
+                } else if ((newPlan?.trialDays ?? 0) > 0) {
+                    endDate.setMonth(endDate.getMonth() + (newPlan?.trialDays ?? 0));
+                } else {
+                    // Free forever plan
+                    endDate.setFullYear(endDate.getFullYear() + 100); // Far future
+                }
+
+                const newSubscription = await prisma.userSubscription.create({
+                    data: {
+                        userId,
+                        planId: newPlanId,
+                        startDate,
+                        endDate,
+                        status: (newPlan?.trialDays ?? 0) > 0 ? 'TRIAL' : 'ACTIVE',
+                    },
+                    include: {
+                        plan: {
+                            include: { features: true }
+                        },
+                        payment: true
+                    }
+                });
+
+                return sendSuccess(res, newSubscription, "Free plan activated successfully", HttpStatus.OK);
+            }
+
+            // For paid plans without active subscription, redirect to checkout
+            return sendError(res, "No active subscription found. Please use checkout for new subscriptions.", HttpStatus.BAD_REQUEST);
+        }
+
+        // Check if trying to change to same plan
+        if (currentSubscription.planId === newPlanId) {
+            // User wants to cancel scheduled change
+            const updatedSubscription = await prisma.userSubscription.update({
+                where: { id: currentSubscription.id },
+                data: {
+                    nextPlanId: null,
+                    scheduledChangeAt: null,
+                    updatedAt: new Date()
+                },
+                include: {
+                    plan: {
+                        include: { features: true }
+                    },
+                    nextPlan: {
+                        include: { features: true }
+                    },
+                    payment: true
+                }
+            });
+
+            return sendSuccess(res, updatedSubscription, "Scheduled change cancelled", HttpStatus.OK);
+        }
+
+        // Check if user already has a scheduled change to this plan
+        if (currentSubscription.nextPlanId === newPlanId) {
+            return sendError(res, "You already have a scheduled change to this plan", HttpStatus.BAD_REQUEST);
+        }
+
+        // Schedule the plan change for end of current period
+        const updatedSubscription = await prisma.userSubscription.update({
+            where: { id: currentSubscription.id },
+            data: {
+                nextPlanId: newPlanId,
+                scheduledChangeAt: currentSubscription.endDate,
+                updatedAt: new Date()
+            },
+            include: {
+                plan: {
+                    include: { features: true }
+                },
+                nextPlan: {
+                    include: { features: true }
+                },
+                payment: true
+            }
+        });
+
+        return sendSuccess(res, updatedSubscription,
+            `Plan change scheduled successfully. Your current plan will continue until ${formatDate(currentSubscription.endDate, 'MMM dd, yyyy')}.`,
+            HttpStatus.OK
+        );
+
+    } catch (error: any) {
+        console.error("changeUserSubscriptionPlanSelf error:", error);
+        return sendError(res, error.message || "Failed to change subscription plan", HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+};
+
+// subscription.controller.ts - Add cancel scheduled change endpoint
+export const cancelScheduledPlanChange = async (req: Request, res: Response) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) return sendError(res, "User not authenticated", HttpStatus.UNAUTHORIZED);
+
+        // Get current active subscription
+        const subscription = await prisma.userSubscription.findFirst({
+            where: {
+                userId,
+                isDeleted: false,
+                status: { in: ['ACTIVE', 'TRIAL'] }
+            }
+        });
+
+        if (!subscription) {
+            return sendError(res, "No active subscription found", HttpStatus.BAD_REQUEST);
+        }
+
+        // Check if there's a scheduled change
+        if (!subscription.nextPlanId || !subscription.scheduledChangeAt) {
+            return sendSuccess(res, null, "No scheduled plan change to cancel", HttpStatus.OK);
+        }
+
+        // Update subscription to remove scheduled change
+        const updatedSubscription = await prisma.userSubscription.update({
+            where: { id: subscription.id },
+            data: {
+                nextPlanId: null,
+                scheduledChangeAt: null,
+                updatedAt: new Date()
+            },
+            include: {
+                plan: {
+                    include: { features: true }
+                },
+                nextPlan: {
+                    include: { features: true }
+                },
+                payment: true
+            }
+        });
+
+        return sendSuccess(res, updatedSubscription, "Scheduled plan change cancelled successfully", HttpStatus.OK);
+    } catch (error: any) {
+        console.error("cancelScheduledPlanChange error:", error);
+        return sendError(res, error.message || "Failed to cancel scheduled change", HttpStatus.INTERNAL_SERVER_ERROR);
     }
 };

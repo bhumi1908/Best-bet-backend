@@ -663,7 +663,6 @@ export const createStripeCheckoutSession = async ({
 }) => {
   try {
     const active = await getActiveSubscriptionForUser(userId);
-    console.log('active', active)
     if (active) {
       throw new Error("An active subscription already exists. Please wait for it to expire or cancel at period end.");
     }
