@@ -18,6 +18,7 @@ export const getAllPlans = async (req: Request, res: Response) => {
                 isActive: true,
                 discountPercent:true,
                  trialDays: true,
+                 stripePriceId: true,
                 features: {
                     where: { isDeleted: false },
                     select: {

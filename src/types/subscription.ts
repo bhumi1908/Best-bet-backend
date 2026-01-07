@@ -1,6 +1,6 @@
 import { StringSchema } from "joi";
 
-export type SubscriptionStatus = "ACTIVE" | "EXPIRED" | "CANCELED" | "REFUNDED" | "TRIAL";
+export type SubscriptionStatus = "ACTIVE" | "EXPIRED" | "CANCELED" | "REFUNDED" | "TRIAL" | "PAST_DUE";
 type PaymentStatus =
   "PENDING" |
   "SUCCESS" |

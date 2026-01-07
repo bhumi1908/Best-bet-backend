@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import prisma from "../config/prisma";
 import stripe from "../config/stripe";
-import { PaymentStatus } from "../generated/prisma/enums";
+import { PaymentStatus, SubscriptionStatus } from "../generated/prisma/enums";
 
 const resolvePaymentMethod = async (paymentMethod: Stripe.PaymentMethod | string | null) => {
   if (!paymentMethod) return "unknown";
@@ -63,12 +63,12 @@ const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session
 };
 
 const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
-  
+
   const inv = invoice as Stripe.Invoice & {
     subscription?: string | null;
     payment_intent?: string | null;
   };
-  
+
   const status: PaymentStatus =
     inv.status === "paid"
       ? "SUCCESS"
@@ -103,7 +103,7 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
     return;
   }
 
-const paymentMethod = await resolvePaymentMethod(paymentIntent.payment_method);
+  const paymentMethod = await resolvePaymentMethod(paymentIntent.payment_method);
 
   const payment = await prisma.payment.upsert({
     where: { stripePaymentId: paymentIntentId },
@@ -141,39 +141,148 @@ const paymentMethod = await resolvePaymentMethod(paymentIntent.payment_method);
       updatedAt: new Date(),
     },
   });
+  const dbSubscription = await prisma.userSubscription.findFirst({
+    where: {
+      stripeSubscriptionId,
+      isDeleted: false,
+    },
+  });
 
-  await prisma.userSubscription.updateMany({
-    where: { stripeSubscriptionId },
+  if (!dbSubscription) {
+    console.warn("DB subscription not found", stripeSubscriptionId);
+    return;
+  }
+
+  const subscriptionLine = inv.lines.data.find(
+    (line) => typeof line.subscription === "string"
+  );
+
+  if (!subscriptionLine) {
+    console.warn("No subscription line found", inv.id);
+    return;
+  }
+
+  const { start, end } = subscriptionLine.period;
+
+  const startDate = new Date(start * 1000);
+  const endDate = new Date(end * 1000);
+
+  const updatePayload: any = {
+    status: "ACTIVE",
+    startDate: startDate,
+    endDate: endDate,
+    paymentId: payment.id,
+    updatedAt: new Date(),
+  };
+
+  if (
+    dbSubscription.nextPlanId &&
+    dbSubscription.scheduledChangeAt &&
+    new Date() >= dbSubscription.scheduledChangeAt
+  ) {
+    updatePayload.planId = dbSubscription.nextPlanId;
+    updatePayload.nextPlanId = null;
+    updatePayload.scheduledChangeAt = null;
+  }
+
+  await prisma.userSubscription.update({
+    where: { id: dbSubscription.id },
+    data: updatePayload,
+  });
+
+
+};
+const handleInvoicePaymentFailed = async (invoice: Stripe.Invoice) => {
+  const inv = invoice as Stripe.Invoice & {
+    subscription?: string | null;
+    payment_intent?: string | null;
+  };
+  if (!inv.subscription || typeof inv.subscription !== "string") {
+    console.warn("Payment failed: missing subscription", invoice.id);
+    return;
+  }
+
+  const stripeSubscriptionId = inv.subscription;
+
+  const dbSubscription = await prisma.userSubscription.findFirst({
+    where: {
+      stripeSubscriptionId,
+      isDeleted: false,
+    },
+  });
+  if (!dbSubscription) {
+    console.warn("Payment failed: DB subscription not found", stripeSubscriptionId);
+    return;
+  }
+
+  await prisma.userSubscription.update({
+    where: { id: dbSubscription.id },
     data: {
-      status: "ACTIVE",
-      startDate: new Date(inv.period_start * 1000),
-      endDate: new Date(invoice.period_end * 1000),
-      paymentId: payment.id,
+      status: "PAST_DUE",
       updatedAt: new Date(),
     },
   });
 };
 
-const handleSubscriptionUpdated = async (subscription: Stripe.Subscription) => {
+
+const handleSubscriptionUpdated = async (
+  subscription: Stripe.Subscription
+) => {
+  if (subscription.cancel_at_period_end) {
+    return;
+  }
+  if (subscription.status === "canceled") {
+    return;
+  }
+
+  let status: SubscriptionStatus;
+
+  switch (subscription.status) {
+    case "active":
+      status = "ACTIVE";
+      break;
+
+    case "trialing":
+      status = "TRIAL";
+      break;
+
+    case "incomplete_expired":
+      status = "EXPIRED";
+      break;
+
+    default:
+      return;
+  }
+
   await prisma.userSubscription.updateMany({
     where: { stripeSubscriptionId: subscription.id },
     data: {
-      status:
-        subscription.status === "active"
-          ? "ACTIVE"
-          : subscription.status === "trialing"
-            ? "TRIAL"
-            : "EXPIRED",
+      status,
+      updatedAt: new Date(),
     },
   });
 };
 
-const handleSubscriptionDeleted = async (subscription: Stripe.Subscription) => {
+
+const handleSubscriptionDeleted = async (
+  subscription: Stripe.Subscription
+) => {
+  const canceledAt = subscription.canceled_at
+    ? new Date(subscription.canceled_at * 1000)
+    : new Date();
+
   await prisma.userSubscription.updateMany({
-    where: { stripeSubscriptionId: subscription.id },
-    data: { status: "CANCELED" },
+    where: {
+      stripeSubscriptionId: subscription.id,
+    },
+    data: {
+      status: "CANCELED",
+      endDate: canceledAt,
+      updatedAt: new Date(),
+    },
   });
 };
+
 
 const handleChargeRefunded = async (charge: Stripe.Charge) => {
   const refundId = charge.refunds?.data?.[0]?.id ?? null;
@@ -202,6 +311,10 @@ export const handleStripeEvent = async (event: Stripe.Event) => {
 
     case "invoice.payment_succeeded":
       await handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);
+      break;
+
+    case "invoice.payment_failed":
+      await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
       break;
 
     case "customer.subscription.updated":
