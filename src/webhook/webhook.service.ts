@@ -14,8 +14,8 @@ const resolvePaymentMethod = async (paymentMethod: Stripe.PaymentMethod | string
   return paymentMethod.type ?? "unknown";
 };
 
-const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session) => {        
-  
+const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session) => {
+
   if (!session.metadata?.userId || !session.metadata?.planId) {
     throw new Error("Missing metadata in checkout session");
   }
@@ -64,7 +64,7 @@ const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session
 };
 
 const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
-  
+
   const inv = invoice as Stripe.Invoice & {
     subscription?: string | null;
     payment_intent?: string | null;
@@ -83,7 +83,7 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
 
   const stripeSubscriptionId = inv.subscription;
   const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-  
+
   const userId = Number(stripeSubscription.metadata?.userId);
   if (!userId) {
     console.warn("Subscription missing userId metadata", stripeSubscriptionId);
@@ -173,7 +173,7 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
     updatePayload.nextPlanId = null;
     updatePayload.scheduledChangeAt = null;
   }
-    await prisma.userSubscription.update({
+  await prisma.userSubscription.update({
     where: { id: dbSubscription.id },
     data: updatePayload,
   });
@@ -270,7 +270,6 @@ const handleSubscriptionDeleted = async (
     },
   });
 };
-
 
 const handleChargeRefunded = async (charge: Stripe.Charge) => {
   const refundId = charge.refunds?.data?.[0]?.id ?? null;

@@ -2,7 +2,7 @@ import prisma from '../../config/prisma';
 
 export interface GameTypeResponse {
   id: number;
-  game_code: string;
+  game_code: string | null;
   game_name: string;
 }
 
