@@ -75,7 +75,6 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
     }
 };
 
-
 /**
  * Get current authenticated user's subscription
  */
@@ -606,6 +605,8 @@ export const revokeUserSubscriptionSelf = async (req: Request, res: Response) =>
             data: {
                 status: "CANCELED",
                 updatedAt: new Date(),
+                nextPlanId: null,
+                scheduledChangeAt: null,
             },
         });
 

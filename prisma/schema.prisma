@@ -37,6 +37,17 @@ enum SubscriptionStatus {
   PAST_DUE
 }
 
+enum DrawTime {
+  MID
+  EVE
+}
+
+enum GameResultStatus {
+  WIN
+  LOSS
+  PENDING
+}
+
 model User {
   id           Int       @id @default(autoincrement())
   firstName     String? @map("first_name")
@@ -60,8 +71,6 @@ model User {
   subscriptions         UserSubscription[]
   payments              Payment[]
   refunds               Refund[]
-  
-
   @@map("users")
 }
 
@@ -211,4 +220,63 @@ model Refund {
   deletedAt     DateTime?
 
   @@map("refunds")
+}
+
+model State {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  code        String?      @unique // State abbreviation (e.g., "CA", "NY")
+  isActive    Boolean      @default(true) @map("is_active")
+  
+  gameHistory GameHistory[]
+
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  
+  isDeleted   Boolean      @default(false)
+  deletedAt   DateTime?
+
+  @@map("states")
+}
+
+model GameType {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique // e.g., "Pick3", "Pick4", "Pick5"
+  code        String?      @unique // Short code for the game type
+  description String?
+  isActive    Boolean      @default(true) @map("is_active")
+  
+  gameHistory GameHistory[]
+
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  
+  isDeleted   Boolean      @default(false)
+  deletedAt   DateTime?
+
+  @@map("game_types")
+}
+
+model GameHistory {
+  id              Int              @id @default(autoincrement())
+  stateId         Int              @map("state_id")
+  gameTypeId      Int              @map("game_type_id")
+  drawDate        DateTime         @map("draw_date") // Date of the draw
+  drawTime        DrawTime         @map("draw_time")
+  winningNumbers  String           @map("winning_numbers") // e.g., "123", "0456"
+  resultStatus    GameResultStatus @default(PENDING) @map("result_status")
+  totalWinners    Int              @default(0) @map("total_winners")
+  prizeAmount     Decimal?         @map("prize_amount") @db.Decimal(10, 2)
+  state           State            @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  gameType        GameType         @relation(fields: [gameTypeId], references: [id], onDelete: Restrict)
+
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // Prevent duplicate entries for same state + game + draw date + draw time
+  @@unique([stateId, gameTypeId, drawDate, drawTime], name: "unique_draw")
+  @@index([stateId, gameTypeId])
+  @@index([drawDate])
+  @@index([resultStatus])
+  @@map("game_history")
 }

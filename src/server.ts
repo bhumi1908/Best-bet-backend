@@ -13,6 +13,10 @@ import subscriptionPlanAdminRoutes from './modules/admin/subscription-plans/subs
 import subscriptionRoutes from './modules/subscription/subscription.routes'
 import stripeRoutes from './modules/stripe/stripe.routes'
 import webhookRoutes from './webhook/webhook.routes'
+import { gameHistoryRouter, gameHistoriesRouter } from './modules/game-history/game-history.routes'
+import statesRoutes from './modules/states/states.routes'
+import gameTypesRoutes from './modules/game-types/game-types.routes'
+import drawHistoryRoutes from './modules/draw-history/draw-history.routes'
 import { API_ROUTES } from './utils/constants/routes';
 import "./cron/subscriptionExpire.cron";
 
@@ -56,6 +60,11 @@ app.use(API_ROUTES.SUBSCRIPTIONPLAN.BASE, subscriptionPlanRoutes);
 app.use(API_ROUTES.SUBSCRIPTIONPLAN.ADMINBASE, subscriptionPlanAdminRoutes);
 app.use(API_ROUTES.SUBSCRIPTION.BASE, subscriptionRoutes);
 app.use(API_ROUTES.STRIPE.BASE, stripeRoutes);
+app.use(API_ROUTES.STATES.BASE, statesRoutes);
+app.use(API_ROUTES.GAME_TYPES.BASE, gameTypesRoutes);
+app.use(API_ROUTES.GAME_HISTORY.BASE, gameHistoryRouter);
+app.use(API_ROUTES.GAME_HISTORY.HISTORIES, gameHistoriesRouter);
+app.use(API_ROUTES.DRAW_HISTORY.BASE, drawHistoryRoutes);
 
 // 404 handler
 app.use((req, res) => {
