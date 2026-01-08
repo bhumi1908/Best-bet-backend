@@ -15,6 +15,8 @@ const resolvePaymentMethod = async (paymentMethod: Stripe.PaymentMethod | string
 };
 
 const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session) => {
+  console.log('Fire the chheckout session completed webhook');
+  
   if (!session.metadata?.userId || !session.metadata?.planId) {
     throw new Error("Missing metadata in checkout session");
   }
@@ -63,12 +65,14 @@ const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session
 };
 
 const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
-
+  console.log('Fire the invoice payment succeeded webhook');
+  console.log('Fire-1');
+  
   const inv = invoice as Stripe.Invoice & {
     subscription?: string | null;
     payment_intent?: string | null;
   };
-
+  console.log('Fire-2');
   const status: PaymentStatus =
     inv.status === "paid"
       ? "SUCCESS"
@@ -80,21 +84,21 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
     console.warn("Invoice missing subscription", inv.id);
     return;
   }
-
+  console.log('Fire-3');
   const stripeSubscriptionId = inv.subscription;
   const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-
+  
   const userId = Number(stripeSubscription.metadata?.userId);
   if (!userId) {
     console.warn("Subscription missing userId metadata", stripeSubscriptionId);
     return;
   }
-
+  console.log('Fire-4');
   if (!inv.payment_intent || typeof inv.payment_intent !== "string") {
     console.warn("Invoice missing payment_intent", inv.id);
     return;
   }
-
+  console.log('Fire-5');
   const paymentIntentId = inv.payment_intent;
   const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
@@ -102,9 +106,10 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
     console.warn("PaymentIntent not found", paymentIntentId);
     return;
   }
-
+  console.log('Fire-6');
   const paymentMethod = await resolvePaymentMethod(paymentIntent.payment_method);
 
+  console.log('Fire-7');
   const payment = await prisma.payment.upsert({
     where: { stripePaymentId: paymentIntentId },
     update: {
@@ -120,14 +125,14 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
       paymentMethod,
     },
   });
-
+  console.log('Fire-8');
   if (typeof inv.customer === "string") {
     await prisma.user.updateMany({
       where: { id: userId, stripeCustomerId: null },
       data: { stripeCustomerId: inv.customer },
     });
   }
-
+  console.log('Fire-9');
   await prisma.userSubscription.updateMany({
     where: {
       userId,
@@ -141,13 +146,14 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
       updatedAt: new Date(),
     },
   });
+  console.log('Fire-10');
   const dbSubscription = await prisma.userSubscription.findFirst({
     where: {
       stripeSubscriptionId,
       isDeleted: false,
     },
   });
-
+  console.log('Fire-11');
   if (!dbSubscription) {
     console.warn("DB subscription not found", stripeSubscriptionId);
     return;
@@ -156,17 +162,17 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
   const subscriptionLine = inv.lines.data.find(
     (line) => typeof line.subscription === "string"
   );
-
+  console.log('Fire-12');
   if (!subscriptionLine) {
     console.warn("No subscription line found", inv.id);
     return;
   }
-
+  console.log('Fire-13');
   const { start, end } = subscriptionLine.period;
-
+  console.log('Fire-14');
   const startDate = new Date(start * 1000);
   const endDate = new Date(end * 1000);
-
+  console.log('Fire-15');     
   const updatePayload: any = {
     status: "ACTIVE",
     startDate: startDate,
@@ -174,7 +180,7 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
     paymentId: payment.id,
     updatedAt: new Date(),
   };
-
+  console.log('Fire-16');
   if (
     dbSubscription.nextPlanId &&
     dbSubscription.scheduledChangeAt &&
@@ -184,7 +190,7 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
     updatePayload.nextPlanId = null;
     updatePayload.scheduledChangeAt = null;
   }
-
+  console.log('Fire-17');
   await prisma.userSubscription.update({
     where: { id: dbSubscription.id },
     data: updatePayload,
@@ -228,6 +234,7 @@ const handleInvoicePaymentFailed = async (invoice: Stripe.Invoice) => {
 const handleSubscriptionUpdated = async (
   subscription: Stripe.Subscription
 ) => {
+  console.log('Fire the subscription updated webhook');
   if (subscription.cancel_at_period_end) {
     return;
   }
@@ -267,6 +274,7 @@ const handleSubscriptionUpdated = async (
 const handleSubscriptionDeleted = async (
   subscription: Stripe.Subscription
 ) => {
+  console.log('Fire the subscription deleted webhook');
   const canceledAt = subscription.canceled_at
     ? new Date(subscription.canceled_at * 1000)
     : new Date();
@@ -285,6 +293,7 @@ const handleSubscriptionDeleted = async (
 
 
 const handleChargeRefunded = async (charge: Stripe.Charge) => {
+  console.log('Fire the charge refunded webhook');
   const refundId = charge.refunds?.data?.[0]?.id ?? null;
 
   if (!refundId) {
