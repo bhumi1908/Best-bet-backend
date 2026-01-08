@@ -34,6 +34,19 @@ export const API_ROUTES = {
   STRIPE: {
     BASE: '/api/stripe'
   },
+  STATES: {
+    BASE: '/api/states',
+  },
+  GAME_TYPES: {
+    BASE: '/api/game-types',
+  },
+  GAME_HISTORY: {
+    BASE: '/api/game-history',
+    HISTORIES: '/api/game-histories'
+  },
+  DRAW_HISTORY: {
+    BASE: '/api/draw-history',
+  },
   HEALTH: '/healthcheck',
   WEBHOOK: '/api/webhook'
 } as const;
