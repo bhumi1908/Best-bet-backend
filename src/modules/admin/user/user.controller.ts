@@ -149,6 +149,14 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         firstName: true,
         lastName: true,
         phoneNo: true,
+        stateId: true,
+        state: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
         isTrial: true,
         role: true,
         isInactive: true,
@@ -253,6 +261,12 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       lastName: user.lastName,
       isTrial: user.isTrial,
       phoneNo: user.phoneNo,
+      stateId: user.stateId,
+      state: user.state ? {
+        id: user.state.id,
+        name: user.state.name,
+        code: user.state.code,
+      } : null,
       role: user.role,
       isInactive: user.isInactive,
       createdAt: user.createdAt,
@@ -313,7 +327,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 export const updateUser = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = parseInt(req.params.id);
-    const { firstName, lastName, phoneNo, role, isInactive } = req.body;
+    const { firstName, lastName, phoneNo, stateId, role, isInactive } = req.body;
     const currentUserId = req.user?.id;
 
     if (isNaN(userId)) {
@@ -360,11 +374,30 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
       }
     }
 
+    // Validate state if stateId is being updated
+    if (stateId !== undefined && stateId !== null) {
+      const state = await prisma.state.findUnique({
+        where: { id: stateId },
+        select: { id: true, isActive: true, isDeleted: true },
+      });
+
+      if (!state) {
+        sendError(res, 'Invalid state selected', HttpStatus.BAD_REQUEST);
+        return;
+      }
+
+      if (state.isDeleted || !state.isActive) {
+        sendError(res, 'Selected state is not available', HttpStatus.BAD_REQUEST);
+        return;
+      }
+    }
+
     // Build update data
     const updateData: any = {};
     if (firstName !== undefined) updateData.firstName = firstName;
     if (lastName !== undefined) updateData.lastName = lastName;
     if (phoneNo !== undefined) updateData.phoneNo = phoneNo;
+    if (stateId !== undefined) updateData.stateId = stateId;
     if (role !== undefined) updateData.role = role;
     if (isInactive !== undefined) updateData.isInactive = isInactive;
 
@@ -394,6 +427,14 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
         firstName: true,
         lastName: true,
         phoneNo: true,
+        stateId: true,
+        state: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
         role: true,
         isInactive: true,
         createdAt: true,

@@ -144,7 +144,9 @@ export const editProfileDetail = async (
             return;
         }
 
-        const { firstName, lastName, phoneNo } = req.body;
+        const { firstName, lastName, phoneNo, stateId } = req.body;
+
+        console.log(firstName, lastName, phoneNo, stateId,"Data---------");
 
         if (!firstName || !lastName || !phoneNo) {
             sendError(
@@ -201,6 +203,26 @@ export const editProfileDetail = async (
             }
         }
 
+        // Validate state if stateId is being updated
+        if (stateId !== undefined && stateId !== null) {
+            const state = await prisma.state.findUnique({
+                where: { id: stateId },
+                select: { id: true, isActive: true, isDeleted: true },
+            });
+
+            console.log(state,"State---------");
+
+            if (!state) {
+                sendError(res, 'Invalid state selected', HttpStatus.BAD_REQUEST);
+                return;
+            }
+
+            if (state.isDeleted || !state.isActive) {
+                sendError(res, 'Selected state is not available', HttpStatus.BAD_REQUEST);
+                return;
+            }
+        }
+
         const updateData: any = {
             firstName: firstName.trim(),
             lastName: lastName.trim(),
@@ -208,6 +230,10 @@ export const editProfileDetail = async (
 
         if (phoneNo !== undefined && phoneNo !== null) {
             updateData.phoneNo = phoneNo.trim();
+        }
+
+        if (stateId !== undefined && stateId !== null) {
+            updateData.stateId = stateId;
         }
 
         const updatedUser = await prisma.user.update({
@@ -219,6 +245,14 @@ export const editProfileDetail = async (
                 firstName: true,
                 lastName: true,
                 phoneNo: true,
+                stateId: true,
+                state: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
                 role: true,
             },
         });

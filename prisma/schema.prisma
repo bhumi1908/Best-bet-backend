@@ -58,6 +58,7 @@ model User {
   role         Role    @default(USER)
   refreshToken String?   @map("refresh_token")
     stripeCustomerId       String?   @unique @map("stripe_customer_id")
+  stateId      Int?      @map("state_id")
 
     isTrial  Boolean     @default(false)
     
@@ -67,6 +68,7 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
+  state                  State?   @relation(fields: [stateId], references: [id], onDelete: SetNull)
   uploads               Upload[]
   subscriptions         UserSubscription[]
   payments              Payment[]
@@ -228,6 +230,7 @@ model State {
   code        String?      @unique // State abbreviation (e.g., "CA", "NY")
   isActive    Boolean      @default(true) @map("is_active")
   
+  users       User[]
   gameHistory GameHistory[]
 
   createdAt   DateTime     @default(now()) @map("created_at")
