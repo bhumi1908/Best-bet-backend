@@ -2,17 +2,6 @@ import Joi from 'joi';
 
 // Query parameters validation for GET /api/draw-history (public endpoint)
 export const getDrawHistoriesQuerySchema = Joi.object({
-  page: Joi.number().integer().min(1).optional().default(1).messages({
-    'number.base': 'Page must be a number',
-    'number.integer': 'Page must be an integer',
-    'number.min': 'Page must be at least 1',
-  }),
-  limit: Joi.number().integer().min(1).max(100).optional().default(16).messages({
-    'number.base': 'Limit must be a number',
-    'number.integer': 'Limit must be an integer',
-    'number.min': 'Limit must be at least 1',
-    'number.max': 'Limit must not exceed 100',
-  }),
   search: Joi.string().trim().optional().messages({
     'string.base': 'Search must be a string',
   }),
@@ -20,6 +9,9 @@ export const getDrawHistoriesQuerySchema = Joi.object({
     'number.base': 'State ID must be a number',
     'number.integer': 'State ID must be an integer',
     'number.positive': 'State ID must be positive',
+  }),
+  drawTime: Joi.string().trim().optional().messages({
+    'string.base': 'Draw time must be a string',
   }),
   fromDate: Joi.date().optional().messages({
     'date.base': 'From date must be a valid date',

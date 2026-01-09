@@ -4,36 +4,38 @@ import prisma from '../../config/prisma';
 export interface DrawHistoryFilters {
   search?: string; // Search by winning number, draw date, or draw time
   stateId?: number;
+  drawTime?: string; // Filter by draw time (e.g., "Midday", "Evening", "12:00 PM", "11:00 PM")
   fromDate?: Date;
   toDate?: Date;
   sortBy?: 'drawDate' | 'winningNumbers';
   sortOrder?: 'asc' | 'desc';
 }
 
-export interface PaginationParams {
-  page: number;
-  limit: number;
-}
-
 // Format draw history response for public API
-const formatDrawHistoryResponse = (history: any) => ({
-  id: history.id,
-  draw_date: history.drawDate,
-  draw_time: history.drawTime,
-  winning_numbers: history.winningNumbers,
-  prize_amount: history.prizeAmount?.toNumber() || 0,
-  total_winners: history.totalWinners,
-  state_name: history.state.name,
-  state_code: history.state.code,
-  game_name: history.gameType.name,
-  game_code: history.gameType.code,
-});
+const formatDrawHistoryResponse = (history: any) => {
+  // Format date as YYYY-MM-DD in local timezone (not UTC)
+  const drawDate = history.drawDate instanceof Date ? history.drawDate : new Date(history.drawDate);
+  const year = drawDate.getFullYear();
+  const month = String(drawDate.getMonth() + 1).padStart(2, '0');
+  const day = String(drawDate.getDate()).padStart(2, '0');
+  const formattedDate = `${year}-${month}-${day}`;
 
-// Get all draw histories for public API with filters and pagination
-export const getPublicDrawHistories = async (filters: DrawHistoryFilters, pagination: PaginationParams) => {
-  const { page, limit } = pagination;
-  const skip = (page - 1) * limit;
+  return {
+    id: history.id,
+    draw_date: formattedDate, // Format as YYYY-MM-DD in local timezone
+    draw_time: history.drawTime, // Enum: 'MID' or 'EVE'
+    winning_numbers: history.winningNumbers,
+    prize_amount: history.prizeAmount?.toNumber() || 0,
+    total_winners: history.totalWinners,
+    state_name: history.state.name,
+    state_code: history.state.code,
+    game_name: history.gameType.name,
+    game_code: history.gameType.code,
+  };
+};
 
+// Get all draw histories for public API with filters (no pagination)
+export const getPublicDrawHistories = async (filters: DrawHistoryFilters) => {
   // Build where clause
   const where: any = {};
 
@@ -42,19 +44,35 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters, pagina
     where.stateId = filters.stateId;
   }
 
-  // Date range filter (start: 00:00:01, end: 23:59:59)
-  // This takes precedence over date search if both are provided
+  // Draw time filter (enum: MID or EVE)
+  if (filters.drawTime) {
+    // Convert frontend values to enum values
+    const drawTimeUpper = filters.drawTime.toUpperCase();
+    if (drawTimeUpper === 'MIDDAY' || drawTimeUpper === 'MID') {
+      where.drawTime = 'MID';
+    } else if (drawTimeUpper === 'EVENING' || drawTimeUpper === 'EVE') {
+      where.drawTime = 'EVE';
+    } else if (drawTimeUpper === 'MID' || drawTimeUpper === 'EVE') {
+      // Already in correct format
+      where.drawTime = drawTimeUpper as 'MID' | 'EVE';
+    }
+  }
+
+  // Date range filter (inclusive of both start and end dates)
+  // Dates are already properly formatted in the controller
   if (filters.fromDate || filters.toDate) {
     where.drawDate = {};
     if (filters.fromDate) {
-      const from = new Date(filters.fromDate);
-      from.setHours(0, 0, 0, 1); // Start at 00:00:01
-      where.drawDate.gte = from;
+      // Use the date as-is (already set to start of day in controller)
+      const fromDate = new Date(filters.fromDate);
+      fromDate.setHours(0, 0, 0, 1);
+      where.drawDate.gte = filters.fromDate;
     }
     if (filters.toDate) {
-      const to = new Date(filters.toDate);
-      to.setHours(23, 59, 59, 999); // End at 23:59:59
-      where.drawDate.lte = to;
+      const endOfDay = new Date(filters.toDate);
+      endOfDay.setHours(23, 59, 59, 999);
+      // Use the date as-is (already set to end of day in controller)
+      where.drawDate.lte = filters.toDate;
     }
   }
 
@@ -68,13 +86,15 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters, pagina
           mode: 'insensitive',
         },
       },
-      {
-        drawTime: {
-          contains: filters.search,
-          mode: 'insensitive',
-        },
-      },
-    ];
+    ];  
+
+    // Handle draw time search (enum: MID or EVE)
+    const searchUpper = filters.search.toUpperCase();
+    if (searchUpper === 'MIDDAY' || searchUpper === 'MID') {
+      searchConditions.push({ drawTime: 'MID' });
+    } else if (searchUpper === 'EVENING' || searchUpper === 'EVE') {
+      searchConditions.push({ drawTime: 'EVE' });
+    }
 
     // Try to parse as date if search looks like a date
     // Only add date search if date range filter is not already set
@@ -116,38 +136,29 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters, pagina
     orderBy.drawDate = 'desc';
   }
 
-  // Get draw histories with pagination
-  const [drawHistories, total] = await Promise.all([
-    prisma.gameHistory.findMany({
-      where,
-      include: {
-        state: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-          },
-        },
-        gameType: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-          },
+  // Get all draw histories (no pagination)
+  const drawHistories = await prisma.gameHistory.findMany({
+    where,
+    include: {
+      state: {
+        select: {
+          id: true,
+          name: true,
+          code: true,
         },
       },
-      skip,
-      take: limit,
-      orderBy,
-    }),
-    prisma.gameHistory.count({ where }),
-  ]);
+      gameType: {
+        select: {
+          id: true,
+          name: true,
+          code: true,
+        },
+      },
+    },
+    orderBy,
+  });
 
   return {
     draw_histories: drawHistories.map(formatDrawHistoryResponse),
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
   };
 };
