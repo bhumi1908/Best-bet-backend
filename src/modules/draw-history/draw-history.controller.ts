@@ -6,10 +6,9 @@ import * as drawHistoryService from './draw-history.service';
 // GET /api/draw-history - Get all draw histories (public endpoint)
 export const getDrawHistories = async (req: Request, res: Response): Promise<void> => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 16; // Default 16 per page
     const search = req.query.search as string | undefined;
     const stateId = req.query.stateId ? parseInt(req.query.stateId as string) : undefined;
+    const drawTime = req.query.drawTime as string | undefined;
     const fromDate = req.query.fromDate as string | undefined;
     const toDate = req.query.toDate as string | undefined;
     const sortBy = (req.query.sortBy as string) || 'drawDate';
@@ -36,24 +35,19 @@ export const getDrawHistories = async (req: Request, res: Response): Promise<voi
     const filters: drawHistoryService.DrawHistoryFilters = {
       search,
       stateId,
-      fromDate: fromDate ? new Date(fromDate) : undefined,
+      drawTime,
+      fromDate:  fromDate ? new Date(fromDate) : undefined,
       toDate: toDate ? new Date(toDate) : undefined,
       sortBy: sortBy as 'drawDate' | 'winningNumbers',
       sortOrder,
     };
 
-    const result = await drawHistoryService.getPublicDrawHistories(filters, { page, limit });
+    const result = await drawHistoryService.getPublicDrawHistories(filters);
 
     sendSuccess(
       res,
       {
         draw_histories: result.draw_histories,
-        pagination: {
-          page: result.page,
-          limit: result.limit,
-          total: result.total,
-          totalPages: result.totalPages,
-        },
       },
       'Draw histories retrieved successfully'
     );

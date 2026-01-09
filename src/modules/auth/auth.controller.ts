@@ -20,11 +20,11 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 // User Register 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, firstName, lastName, phoneNo, role } = req.body;
+    const { email, password, firstName, lastName, phoneNo, stateId, role } = req.body;
 
     // Validate input
-    if (!email || !password || !firstName || !lastName || !phoneNo) {
-      sendError(res, 'Email, password, first name, last name, and phone number are required', HttpStatus.BAD_REQUEST);
+    if (!email || !password || !firstName || !lastName || !phoneNo || !stateId) {
+      sendError(res, 'Email, password, first name, last name, phone number, and state are required', HttpStatus.BAD_REQUEST);
       return;
     }
 
@@ -50,6 +50,22 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Validate state exists and is active
+    const state = await prisma.state.findUnique({
+      where: { id: stateId },
+      select: { id: true, isActive: true, isDeleted: true },
+    });
+
+    if (!state) {
+      sendError(res, 'Invalid state selected', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
+    if (state.isDeleted || !state.isActive) {
+      sendError(res, 'Selected state is not available', HttpStatus.BAD_REQUEST);
+      return;
+    }
+
     // Hash password
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
@@ -62,6 +78,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         firstName: firstName,
         lastName: lastName,
         phoneNo: phoneNo,
+        stateId: stateId,
         role: role ?? UserRole.USER,
       },
       select: {
@@ -143,7 +160,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         lastName: true,
         isInactive: true,
         role: true,
-        phoneNo:true,
+        phoneNo: true,
+        stateId: true,
+        state: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
       },
     });
     if (!user) {
@@ -200,7 +225,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
-          phoneNo: user.phoneNo
+          phoneNo: user.phoneNo,
+          stateId: user.stateId,
+          state: user.state ? {
+            id: user.state.id,
+            name: user.state.name,
+            code: user.state.code,
+          } : null,
         },
         token: {
           accessToken,

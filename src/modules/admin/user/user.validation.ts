@@ -14,6 +14,11 @@ export const updateUserSchema = Joi.object({
   phoneNo: Joi.string().trim().pattern(/^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/).optional().messages({
     'string.pattern.base': 'Please provide a valid phone number',
   }),
+  stateId: Joi.number().integer().positive().optional().messages({
+    'number.base': 'State ID must be a number',
+    'number.integer': 'State ID must be an integer',
+    'number.positive': 'State ID must be positive',
+  }),
   role: Joi.string()
     .valid(UserRole.USER, UserRole.ADMIN)
     .optional()
