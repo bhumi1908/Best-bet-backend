@@ -146,8 +146,6 @@ export const editProfileDetail = async (
 
         const { firstName, lastName, phoneNo, stateId } = req.body;
 
-        console.log(firstName, lastName, phoneNo, stateId,"Data---------");
-
         if (!firstName || !lastName || !phoneNo) {
             sendError(
                 res,
@@ -209,8 +207,6 @@ export const editProfileDetail = async (
                 where: { id: stateId },
                 select: { id: true, isActive: true, isDeleted: true },
             });
-
-            console.log(state,"State---------");
 
             if (!state) {
                 sendError(res, 'Invalid state selected', HttpStatus.BAD_REQUEST);

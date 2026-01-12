@@ -65,12 +65,12 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters) => {
     if (filters.fromDate) {
       // Use the date as-is (already set to start of day in controller)
       const fromDate = new Date(filters.fromDate);
-      fromDate.setHours(0, 0, 0, 1);
+      fromDate.setUTCHours(0, 0, 0, 1);
       where.drawDate.gte = filters.fromDate;
     }
     if (filters.toDate) {
       const endOfDay = new Date(filters.toDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      endOfDay.setUTCHours(23, 59, 59, 999);
       // Use the date as-is (already set to end of day in controller)
       where.drawDate.lte = filters.toDate;
     }
@@ -86,7 +86,7 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters) => {
           mode: 'insensitive',
         },
       },
-    ];  
+    ];
 
     // Handle draw time search (enum: MID or EVE)
     const searchUpper = filters.search.toUpperCase();
@@ -108,7 +108,7 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters) => {
             startOfDay.setHours(0, 0, 0, 1);
             const endOfDay = new Date(searchDate);
             endOfDay.setHours(23, 59, 59, 999);
-            
+
             searchConditions.push({
               drawDate: {
                 gte: startOfDay,

@@ -2,6 +2,8 @@ import Stripe from "stripe";
 import prisma from "../config/prisma";
 import stripe from "../config/stripe";
 import { PaymentStatus, SubscriptionStatus } from "../generated/prisma/enums";
+import { HttpStatus } from "../utils/constants/enums";
+import { sendError } from "../utils/helpers";
 
 const resolvePaymentMethod = async (paymentMethod: Stripe.PaymentMethod | string | null) => {
   if (!paymentMethod) return "unknown";
@@ -22,28 +24,30 @@ const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session
 
   const userId = Number(session.metadata.userId);
   const planId = Number(session.metadata.planId);
+  const stripeSubscriptionId = session.subscription as string;
+
+  // Idempotency check: if subscription already exists with this Stripe ID, skip
+  const existing = await prisma.userSubscription.findFirst({
+    where: {
+      stripeSubscriptionId,
+      isDeleted: false,
+    },
+  });
+  if (existing) {
+    sendError(null as any, "Subscription already exists for Stripe subscription", HttpStatus.BAD_REQUEST);
+    return;
+  }
 
   const plan = await prisma.subscriptionPlan.findUnique({
     where: { id: planId, isDeleted: false },
   });
   if (!plan) throw new Error("Subscription plan not found");
 
-  // Prevent duplicate overlap
-  const existingActive = await prisma.userSubscription.findFirst({
-    where: {
-      userId,
-      isDeleted: false,
-      status: { in: ["ACTIVE", "TRIAL"] },
-      endDate: { gt: new Date() },
-    },
-  });
-  if (existingActive) {
-    // Avoid creating overlapping subscriptions; just noop
-    return;
-  }
-
+  // Expire any existing active subscriptions immediately and create new paid subscription
+  // Use single transaction to ensure atomicity - no overlap possible
+  const now = new Date();
   const startDate = new Date();
-  const endDate = new Date(startDate);
+  let endDate = new Date(startDate);
 
   if (plan.trialDays && plan.trialDays > 0) {
     endDate.setDate(endDate.getDate() + plan.trialDays);
@@ -51,15 +55,52 @@ const activateSubscriptionFromCheckout = async (session: Stripe.Checkout.Session
     endDate.setMonth(endDate.getMonth() + plan.duration);
   }
 
-  await prisma.userSubscription.create({
-    data: {
-      userId,
-      planId,
-      startDate,
-      endDate,
-      stripeSubscriptionId: session.subscription as string,
-      status: plan.trialDays && plan.trialDays > 0 ? "TRIAL" : "ACTIVE",
-    },
+  await prisma.$transaction(async (tx) => {
+    // Step 1: Find and expire all existing active subscriptions for this user
+    const existingActive = await tx.userSubscription.findMany({
+      where: {
+        userId,
+        isDeleted: false,
+        status: { in: ["ACTIVE", "TRIAL"] },
+        endDate: { gt: now },
+      },
+    });
+
+    // Expire all existing subscriptions immediately to prevent overlap
+    if (existingActive.length > 0) {
+      await tx.userSubscription.updateMany({
+        where: {
+          id: { in: existingActive.map(sub => sub.id) },
+        },
+        data: {
+          status: "EXPIRED",
+          endDate: now, // Immediate expiration
+          updatedAt: now,
+          nextPlanId: null,
+          scheduledChangeAt: null,
+        },
+      });
+    }
+
+    // Step 2: Create new paid subscription immediately
+    await tx.userSubscription.create({
+      data: {
+        userId,
+        planId,
+        startDate,
+        endDate,
+        stripeSubscriptionId: stripeSubscriptionId,
+        status: plan.trialDays && plan.trialDays > 0 ? "TRIAL" : "ACTIVE",
+      },
+    });
+    
+    // Step 3: Mark user as having used trial if applicable
+    if (plan.trialDays && plan.trialDays > 0) {
+      await tx.user.update({
+        where: { id: userId },
+        data: { isTrial: true },
+      });
+    }
   });
 };
 
@@ -102,48 +143,69 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
   }
   const paymentMethod = await resolvePaymentMethod(paymentIntent.payment_method);
 
-  const payment = await prisma.payment.upsert({
+  // Idempotency: Check if payment already processed
+  const existingPayment = await prisma.payment.findUnique({
     where: { stripePaymentId: paymentIntentId },
-    update: {
-      status,
-      amount: (inv.amount_paid ?? 0) / 100,
-      paymentMethod,
-    },
-    create: {
-      userId,
-      stripePaymentId: paymentIntentId,
-      amount: (inv.amount_paid ?? 0) / 100,
-      status,
-      paymentMethod,
-    },
   });
+  
+  const payment = existingPayment 
+    ? await prisma.payment.update({
+        where: { id: existingPayment.id },
+        data: {
+          status,
+          amount: (inv.amount_paid ?? 0) / 100,
+          paymentMethod,
+        },
+      })
+    : await prisma.payment.create({
+        data: {
+          userId,
+          stripePaymentId: paymentIntentId,
+          amount: (inv.amount_paid ?? 0) / 100,
+          status,
+          paymentMethod,
+        },
+      });
   if (typeof inv.customer === "string") {
     await prisma.user.updateMany({
       where: { id: userId, stripeCustomerId: null },
       data: { stripeCustomerId: inv.customer },
     });
   }
+  // Expire TRIAL subscriptions that have passed their end date
+  const now = new Date();
   await prisma.userSubscription.updateMany({
     where: {
       userId,
       status: "TRIAL",
       isDeleted: false,
-      endDate: { lt: new Date() },
+      endDate: { lte: now }, // Use lte instead of lt for consistency
     },
     data: {
       status: "EXPIRED",
-      endDate: new Date(),
-      updatedAt: new Date(),
+      updatedAt: now,
+      nextPlanId: null,
+      scheduledChangeAt: null,
     },
   });
+  // Find subscription by Stripe ID
   const dbSubscription = await prisma.userSubscription.findFirst({
     where: {
       stripeSubscriptionId,
       isDeleted: false,
     },
   });
+
   if (!dbSubscription) {
-    console.warn("DB subscription not found", stripeSubscriptionId);
+    console.warn("DB subscription not found for invoice payment", stripeSubscriptionId);
+    return;
+  }
+
+  // Don't update if subscription is already expired, refunded, or canceled
+  if (dbSubscription.status === "EXPIRED" || 
+      dbSubscription.status === "REFUNDED" || 
+      dbSubscription.status === "CANCELED") {
+    console.log(`Subscription ${dbSubscription.id} is ${dbSubscription.status}, skipping invoice update`);
     return;
   }
 
@@ -157,22 +219,58 @@ const handleInvoicePaymentSucceeded = async (invoice: Stripe.Invoice) => {
   const { start, end } = subscriptionLine.period;
   const startDate = new Date(start * 1000);
   const endDate = new Date(end * 1000);
+  
+  // Handle scheduled plan changes: expire old subscription and update current one
+  if (
+    dbSubscription.nextPlanId &&
+    dbSubscription.scheduledChangeAt &&
+    now >= dbSubscription.scheduledChangeAt
+  ) {
+    const nextPlan = await prisma.subscriptionPlan.findUnique({
+      where: { id: dbSubscription.nextPlanId, isDeleted: false },
+    });
+
+    if (nextPlan) {
+      // Update current subscription to new plan (no need to create new one since Stripe subscription continues)
+      await prisma.userSubscription.update({
+        where: { id: dbSubscription.id },
+        data: {
+          planId: dbSubscription.nextPlanId,
+          status: "ACTIVE",
+          startDate: startDate,
+          endDate: endDate,
+          paymentId: payment.id,
+          nextPlanId: null,
+          scheduledChangeAt: null,
+          updatedAt: now,
+        },
+      });
+
+      console.log(`Scheduled plan change completed for subscription ${dbSubscription.id}`);
+      return; // Exit early since we updated the subscription
+    }
+  }
+
+  // Idempotency: Only update if dates have changed or status needs updating
+  const needsUpdate = 
+    dbSubscription.startDate.getTime() !== startDate.getTime() ||
+    dbSubscription.endDate.getTime() !== endDate.getTime() ||
+    dbSubscription.status !== "ACTIVE" ||
+    dbSubscription.paymentId !== payment.id;
+    
+  if (!needsUpdate) {
+    console.log(`Subscription ${dbSubscription.id} already up to date, skipping update`);
+    return;
+  }
+  
   const updatePayload: any = {
     status: "ACTIVE",
     startDate: startDate,
     endDate: endDate,
     paymentId: payment.id,
-    updatedAt: new Date(),
+    updatedAt: now,
   };
-  if (
-    dbSubscription.nextPlanId &&
-    dbSubscription.scheduledChangeAt &&
-    new Date() >= dbSubscription.scheduledChangeAt
-  ) {
-    updatePayload.planId = dbSubscription.nextPlanId;
-    updatePayload.nextPlanId = null;
-    updatePayload.scheduledChangeAt = null;
-  }
+  
   await prisma.userSubscription.update({
     where: { id: dbSubscription.id },
     data: updatePayload,
@@ -216,10 +314,49 @@ const handleInvoicePaymentFailed = async (invoice: Stripe.Invoice) => {
 const handleSubscriptionUpdated = async (
   subscription: Stripe.Subscription
 ) => {
-  if (subscription.cancel_at_period_end) {
+  // Idempotency: Check if subscription exists
+  const dbSubscription = await prisma.userSubscription.findFirst({
+    where: { 
+      stripeSubscriptionId: subscription.id,
+      isDeleted: false,
+    },
+  });
+  
+  if (!dbSubscription) {
+    console.warn(`Subscription not found for Stripe subscription ${subscription.id}`);
     return;
   }
+  
+  // If subscription is scheduled to cancel at period end, mark as CANCELED
+  if (subscription.cancel_at_period_end) {
+    // Only update if not already CANCELED
+    if (dbSubscription.status !== "CANCELED") {
+      await prisma.userSubscription.update({
+        where: { id: dbSubscription.id },
+        data: {
+          status: "CANCELED",
+          updatedAt: new Date(),
+        },
+      });
+    }
+    return;
+  }
+  
+  // If subscription is canceled in Stripe, mark as CANCELED
   if (subscription.status === "canceled") {
+    if (dbSubscription.status !== "CANCELED") {
+      const canceledAt = subscription.canceled_at
+        ? new Date(subscription.canceled_at * 1000)
+        : new Date();
+      await prisma.userSubscription.update({
+        where: { id: dbSubscription.id },
+        data: {
+          status: "CANCELED",
+          endDate: canceledAt,
+          updatedAt: new Date(),
+        },
+      });
+    }
     return;
   }
 
@@ -238,35 +375,61 @@ const handleSubscriptionUpdated = async (
       status = "EXPIRED";
       break;
 
+    case "past_due":
+      status = "PAST_DUE";
+      break;
+
     default:
       return;
   }
 
-  await prisma.userSubscription.updateMany({
-    where: { stripeSubscriptionId: subscription.id },
-    data: {
-      status,
-      updatedAt: new Date(),
-    },
-  });
+  // Only update if status has changed
+  if (dbSubscription.status !== status) {
+    await prisma.userSubscription.update({
+      where: { id: dbSubscription.id },
+      data: {
+        status,
+        updatedAt: new Date(),
+      },
+    });
+  }
 };
 
 
 const handleSubscriptionDeleted = async (
   subscription: Stripe.Subscription
 ) => {
+  // Idempotency: Check if subscription exists and needs update
+  const dbSubscription = await prisma.userSubscription.findFirst({
+    where: {
+      stripeSubscriptionId: subscription.id,
+      isDeleted: false,
+    },
+  });
+  
+  if (!dbSubscription) {
+    console.warn(`Subscription not found for deleted Stripe subscription ${subscription.id}`);
+    return;
+  }
+  
+  // Only update if not already CANCELED or EXPIRED
+  if (dbSubscription.status === "CANCELED" || dbSubscription.status === "EXPIRED") {
+    console.log(`Subscription ${dbSubscription.id} already ${dbSubscription.status}, skipping update`);
+    return;
+  }
+  
   const canceledAt = subscription.canceled_at
     ? new Date(subscription.canceled_at * 1000)
     : new Date();
 
-  await prisma.userSubscription.updateMany({
-    where: {
-      stripeSubscriptionId: subscription.id,
-    },
+  await prisma.userSubscription.update({
+    where: { id: dbSubscription.id },
     data: {
       status: "CANCELED",
       endDate: canceledAt,
       updatedAt: new Date(),
+      nextPlanId: null,
+      scheduledChangeAt: null,
     },
   });
 };

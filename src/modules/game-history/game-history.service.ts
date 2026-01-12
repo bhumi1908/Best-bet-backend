@@ -117,13 +117,15 @@ export const createGameHistory = async (data: CreateGameHistoryData) => {
 
   // Normalize draw date (should already be parsed in controller as local timezone date)
   // Ensure it's at start of day (00:00:00) in local timezone
-  const drawDate = data.draw_date instanceof Date
-    ? new Date(data.draw_date.getFullYear(), data.draw_date.getMonth(), data.draw_date.getDate(), 0, 0, 0, 0)
-    : (() => {
-      // Fallback: parse string if somehow it's not a Date (shouldn't happen after controller fix)
-      const parsed = new Date(data.draw_date);
-      return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
-    })();
+  // const drawDate = data.draw_date instanceof Date
+  //   ? new Date(data.draw_date.getFullYear(), data.draw_date.getMonth(), data.draw_date.getDate(), 0, 0, 0, 0)
+  //   : (() => {
+  //     // Fallback: parse string if somehow it's not a Date (shouldn't happen after controller fix)
+  //     const parsed = new Date(data.draw_date);
+  //     return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+  //   })();
+
+  const drawDate = new Date(data.draw_date);
 
   // Check for duplicate
   const isDuplicate = await checkDuplicateEntry(
@@ -214,13 +216,14 @@ export const updateGameHistory = async (id: number, data: UpdateGameHistoryData)
   // Update draw_date if provided (should already be parsed in controller as local timezone date)
   if (data.draw_date !== undefined) {
     // Ensure it's at start of day (00:00:00) in local timezone
-    const drawDate = data.draw_date instanceof Date
-      ? new Date(data.draw_date.getFullYear(), data.draw_date.getMonth(), data.draw_date.getDate(), 0, 0, 0, 0)
-      : (() => {
-        // Fallback: parse string if somehow it's not a Date (shouldn't happen after controller fix)
-        const parsed = new Date(data.draw_date);
-        return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
-      })();
+    // const drawDate = data.draw_date instanceof Date
+    //   ? new Date(data.draw_date.getFullYear(), data.draw_date.getMonth(), data.draw_date.getDate(), 0, 0, 0, 0)
+    //   : (() => {
+    //     // Fallback: parse string if somehow it's not a Date (shouldn't happen after controller fix)
+    //     const parsed = new Date(data.draw_date);
+    //     return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+    //   })();
+    const drawDate = new Date(data.draw_date);
     updateData.drawDate = drawDate;
   }
 
@@ -330,12 +333,12 @@ export const getGameHistories = async (filters: GameHistoryFilters, pagination: 
     where.drawDate = {};
     if (filters.fromDate) {
       const fromDate = new Date(filters.fromDate);
-      fromDate.setHours(0, 0, 0, 1);
+      fromDate.setUTCHours(0, 0, 0, 0);
       where.drawDate.gte = fromDate;
     }
     if (filters.toDate) {
       const endOfDay = new Date(filters.toDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      endOfDay.setUTCHours(23, 59, 59, 999);
       where.drawDate.lte = endOfDay;
     }
   }

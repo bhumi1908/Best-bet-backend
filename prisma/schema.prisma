@@ -64,9 +64,9 @@ model User {
     
   isInactive    Boolean   @default(false) @map("is_inactive")
   forgotHashKey      String?   @unique
-  forgotHashExpiresAt DateTime?
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  forgotHashExpiresAt DateTime? @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   state                  State?   @relation(fields: [stateId], references: [id], onDelete: SetNull)
   uploads               Upload[]
@@ -87,7 +87,7 @@ model Upload {
   width               Int?
   height              Int?
   bytes               Int?
-  createdAt           DateTime  @default(now()) @map("created_at")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
   
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -103,8 +103,8 @@ model Support {
   priority  String
   message   String
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
     @@map("supports")
 }
@@ -128,11 +128,11 @@ model SubscriptionPlan {
   subscriptions UserSubscription[]
   scheduledSubscriptions UserSubscription[] @relation("NextPlan")
 
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
    isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
+  deletedAt     DateTime? @db.Timestamptz
 
   @@map("subscription_plans")
 }
@@ -145,11 +145,11 @@ model Feature {
 
   plan      SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
    isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
+  deletedAt     DateTime? @db.Timestamptz
 
   @@map("features")
 }
@@ -158,8 +158,8 @@ model UserSubscription {
   id                     Int      @id @default(autoincrement())
   userId                 Int     
   planId                 Int     
-  startDate              DateTime @map("start_date")
-  endDate                DateTime @map("end_date")
+  startDate              DateTime @map("start_date") @db.Timestamptz
+  endDate                DateTime @map("end_date") @db.Timestamptz
   
   stripeSubscriptionId   String?   @unique
   paymentId              Int?    
@@ -167,18 +167,18 @@ model UserSubscription {
   status                 SubscriptionStatus @default(ACTIVE) 
 
   nextPlanId             Int?
-  scheduledChangeAt      DateTime?
+  scheduledChangeAt      DateTime? @db.Timestamptz
 
   user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan                   SubscriptionPlan @relation(fields: [planId], references: [id])
   payment                Payment?         @relation(fields: [paymentId], references: [id])
    nextPlan               SubscriptionPlan?  @relation("NextPlan", fields: [nextPlanId], references: [id])
 
-    createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+    createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
    isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
+  deletedAt     DateTime? @db.Timestamptz
 
   @@map("user_subscriptions")
 }
@@ -195,11 +195,11 @@ model Payment {
   subscription     UserSubscription[]
   refund           Refund?
 
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
    isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
+  deletedAt     DateTime? @db.Timestamptz
 
   @@map("payments")
 }
@@ -215,11 +215,11 @@ model Refund {
   payment         Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-    createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+    createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
    isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
+  deletedAt     DateTime? @db.Timestamptz
 
   @@map("refunds")
 }
@@ -233,11 +233,11 @@ model State {
   users       User[]
   gameHistory GameHistory[]
 
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
   
   isDeleted   Boolean      @default(false)
-  deletedAt   DateTime?
+  deletedAt   DateTime? @db.Timestamptz
 
   @@map("states")
 }
@@ -251,11 +251,11 @@ model GameType {
   
   gameHistory GameHistory[]
 
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
   
   isDeleted   Boolean      @default(false)
-  deletedAt   DateTime?
+  deletedAt   DateTime? @db.Timestamptz
 
   @@map("game_types")
 }
@@ -264,7 +264,7 @@ model GameHistory {
   id              Int              @id @default(autoincrement())
   stateId         Int              @map("state_id")
   gameTypeId      Int              @map("game_type_id")
-  drawDate        DateTime         @map("draw_date") // Date of the draw
+  drawDate        DateTime         @map("draw_date") @db.Timestamptz // Date of the draw
   drawTime        DrawTime         @map("draw_time")
   winningNumbers  String           @map("winning_numbers") // e.g., "123", "0456"
   resultStatus    GameResultStatus @default(PENDING) @map("result_status")
@@ -273,8 +273,8 @@ model GameHistory {
   state           State            @relation(fields: [stateId], references: [id], onDelete: Restrict)
   gameType        GameType         @relation(fields: [gameTypeId], references: [id], onDelete: Restrict)
 
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
   // Prevent duplicate entries for same state + game + draw date + draw time
   @@unique([stateId, gameTypeId, drawDate, drawTime], name: "unique_draw")
