@@ -25,7 +25,7 @@ export const calculateSubscriptionStatus = (
 export const formatSubscription = (
   sub: Prisma.UserSubscriptionGetPayload<{
     include: {
-      user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true, isTrial: true } };
+      user: { select: { id: true; firstName: true; lastName: true; email: true, phoneNo: true, stripeCustomerId: true, createdAt: true, isTrial: true, state: { select: { id: true, name: true } } } };
       plan: {
         select: {
           id: true;
@@ -62,6 +62,10 @@ export const formatSubscription = (
       stripeCustomerId: sub.user.stripeCustomerId,
       createdAt: sub.user.createdAt,
       isTrial: sub.user.isTrial,
+      state: sub.user.state ? {
+          id: sub.user.state.id,
+          name: sub.user.state.name,
+        } : null,
     },
     plan: {
       id: sub.plan.id,
@@ -91,12 +95,13 @@ export const formatSubscription = (
 };
 
 export const getActiveSubscriptionForUser = async (userId: number) => {
+  const now = new Date();
   return prisma.userSubscription.findFirst({
     where: {
       userId,
       isDeleted: false,
-      status: { in: ["ACTIVE"] },
-      endDate: { gt: new Date() },
+      status: { in: ["ACTIVE", "TRIAL"] },
+      endDate: { gt: now },
     },
     include: getSubscriptionInclude(),
     orderBy: { createdAt: "desc" },
@@ -124,6 +129,7 @@ export const markExpiredIfPast = async (subscriptionId: number) => {
 export const hasUsedFreePlan = (user: { isTrial?: boolean | null }) => Boolean(user?.isTrial);
 
 export const isFreePlan = (plan: { price: number | null; trialDays: number | null; stripePriceId?: string | null }) => {
+ 
   return (plan.price ?? 0) === 0 || (plan.trialDays ?? 0) > 0 || !plan.stripePriceId;
 };
 
@@ -139,28 +145,64 @@ export const activateFreeOrTrialPlan = async ({
     price: number | null;
   };
 }) => {
+  const now = new Date();
   const startDate = new Date();
-  const endDate = new Date(startDate);
+  let endDate = new Date(startDate);
 
   if (plan.trialDays && plan.trialDays > 0) {
     endDate.setDate(endDate.getDate() + plan.trialDays);
   } else if (plan.duration && plan.duration > 0) {
     endDate.setMonth(endDate.getMonth() + plan.duration);
+  } else {
+    // Free forever plan
+    endDate.setFullYear(endDate.getFullYear() + 100);
   }
 
-  await prisma.userSubscription.create({
-    data: {
-      userId,
-      planId: plan.id,
-      startDate,
-      endDate,
-      status: "TRIAL",
-    },
-  });
+  // Use transaction to ensure atomicity and prevent overlaps
+  await prisma.$transaction(async (tx) => {
+    // Expire any existing active subscriptions
+    const existingActive = await tx.userSubscription.findMany({
+      where: {
+        userId,
+        isDeleted: false,
+        status: { in: ["ACTIVE", "TRIAL"] },
+        endDate: { gt: now },
+      },
+    });
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { isTrial: true },
+    if (existingActive.length > 0) {
+      await tx.userSubscription.updateMany({
+        where: {
+          id: { in: existingActive.map(sub => sub.id) },
+        },
+        data: {
+          status: "EXPIRED",
+          endDate: now,
+          updatedAt: now,
+          nextPlanId: null,
+          scheduledChangeAt: null,
+        },
+      });
+    }
+
+    // Create new free/trial subscription
+    await tx.userSubscription.create({
+      data: {
+        userId,
+        planId: plan.id,
+        startDate,
+        endDate,
+        status: plan.trialDays && plan.trialDays > 0 ? "TRIAL" : "ACTIVE",
+      },
+    });
+
+    // Mark user as having used trial if applicable
+    if (plan.trialDays && plan.trialDays > 0) {
+      await tx.user.update({
+        where: { id: userId },
+        data: { isTrial: true },
+      });
+    }
   });
 
   return { startDate, endDate };
@@ -290,7 +332,13 @@ export const getSubscriptionInclude = () => ({
       phoneNo: true,
       stripeCustomerId: true,
       createdAt: true,
-      isTrial: true
+      isTrial: true,
+      state: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
   },
   plan: {
@@ -301,6 +349,7 @@ export const getSubscriptionInclude = () => ({
       duration: true,
       description: true,
       isActive: true,
+      trialDays: true,
       features: {
         where: { isDeleted: false },
         select: {
@@ -388,7 +437,7 @@ export const getSubscriptionById = async (subscriptionId: number) => {
   return formatSubscription(subscription);
 };
 
-const calculateGrowth = (current: number, previous: number): number => {
+const calculateGrowth = (current: number, previous: number, normalizeNegative: boolean = false): number => {
   if (previous === 0 && current === 0) return 0;
 
   if (previous === 0 && current > 0) return 100;
@@ -400,12 +449,35 @@ const calculateGrowth = (current: number, previous: number): number => {
   // Safety net
   if (!isFinite(growth)) return 0;
 
-  return Math.round(growth);
+  const roundedGrowth = Math.round(growth);
+  
+  // Normalize negative growth to 0% for UI clarity
+  if (normalizeNegative && roundedGrowth < 0) return 0;
+
+  return roundedGrowth;
 };
 
 
 export const getSubscriptionDashboardStats = async () => {
   const now = new Date();
+
+  // Get current year boundaries (Jan 1 - Dec 31)
+  const currentYear = now.getFullYear();
+  const currentYearStart = new Date(currentYear, 0, 1, 0, 0, 0, 0); // Jan 1, 00:00:00
+  const currentYearEnd = new Date(currentYear, 11, 31, 23, 59, 59, 999); // Dec 31, 23:59:59
+
+  // Get previous year boundaries
+  const previousYear = currentYear - 1;
+  const previousYearStart = new Date(previousYear, 0, 1, 0, 0, 0, 0);
+  const previousYearEnd = new Date(previousYear, 11, 31, 23, 59, 59, 999);
+
+  // Get current month boundaries (1st to last day)
+  const currentMonthStart = new Date(currentYear, now.getMonth(), 1, 0, 0, 0, 0);
+  const currentMonthEnd = new Date(currentYear, now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  // Get previous month boundaries
+  const previousMonthStart = new Date(currentYear, now.getMonth() - 1, 1, 0, 0, 0, 0);
+  const previousMonthEnd = new Date(currentYear, now.getMonth(), 0, 23, 59, 59, 999);
 
   const liveMonthStart = getLiveMonthStart(now);
   const previousLiveMonthStart = getLiveMonthStart(liveMonthStart);
@@ -414,70 +486,147 @@ export const getSubscriptionDashboardStats = async () => {
      AGGREGATES
   ======================== */
 
-
   const [
-    totalRevenue,
+    yearlyRevenue,
+    previousYearRevenue,
     thisMonthRevenue,
     lastMonthRevenue,
-
     activeSubscriptions,
     totalSubscriptions,
+    inactiveSubscriptions,
     activeLastMonth
   ] = await Promise.all([
-    prisma.payment.aggregate({
-      _sum: { amount: true },
-      where: { status: "SUCCESS", isDeleted: false }
-    }),
-
+    // Yearly revenue (current year)
     prisma.payment.aggregate({
       _sum: { amount: true },
       where: {
         status: "SUCCESS",
         isDeleted: false,
         createdAt: {
-          gte: liveMonthStart,
-          lte: now
+          gte: currentYearStart,
+          lte: now > currentYearEnd ? currentYearEnd : now
         }
       }
     }),
 
+    // Previous year revenue
     prisma.payment.aggregate({
       _sum: { amount: true },
       where: {
         status: "SUCCESS",
         isDeleted: false,
-        createdAt: { gte: previousLiveMonthStart, lte: liveMonthStart }
+        createdAt: {
+          gte: previousYearStart,
+          lte: previousYearEnd
+        }
       }
     }),
 
-    prisma.userSubscription.count({
-      where: { status: "ACTIVE", isDeleted: false }
+    // Current month revenue (1st to last day)
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        isDeleted: false,
+        createdAt: {
+          gte: currentMonthStart,
+          lte: now > currentMonthEnd ? currentMonthEnd : now
+        }
+      }
     }),
 
-    prisma.userSubscription.count({
-      where: { isDeleted: false }
+    // Previous month revenue
+    prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        isDeleted: false,
+        createdAt: {
+          gte: previousMonthStart,
+          lte: previousMonthEnd
+        }
+      }
     }),
 
+    // Active subscriptions (overall, not monthly)
+    // Definition:
+    // - status must be ACTIVE
+    // - endDate must be greater than "now" (still running)
+    // - user must not be inactive
+    // - subscription record must not be deleted
     prisma.userSubscription.count({
       where: {
         status: "ACTIVE",
+        endDate: { gt: now },
         isDeleted: false,
-        createdAt: { lte: liveMonthStart }
-      }
+        user: {
+          isInactive: false,
+        },
+      },
+    }),
+
+    // Total subscriptions (for active users only)
+    prisma.userSubscription.count({
+      where: {
+        isDeleted: false,
+        user: {
+          isInactive: false,
+        },
+      },
+    }),
+
+    // Inactive subscriptions (overall, not monthly)
+    // Anything that is not "active" by the above definition:
+    // - status is not ACTIVE, or
+    // - status is ACTIVE but endDate is in the past
+    // Always excludes inactive users and deleted records.
+    prisma.userSubscription.count({
+      where: {
+        isDeleted: false,
+        user: {
+          isInactive: false,
+        },
+        OR: [
+          {
+            status: { not: "ACTIVE" },
+          },
+          {
+            status: "ACTIVE",
+            endDate: { lte: now },
+          },
+        ],
+      },
+    }),
+
+    // Active subscriptions in the previous live month window
+    // Uses the same "active" definition, but evaluated at the previousLiveMonthStart cutoff.
+    prisma.userSubscription.count({
+      where: {
+        status: "ACTIVE",
+        endDate: { gt: previousLiveMonthStart },
+        isDeleted: false,
+        user: {
+          isInactive: false,
+        },
+      },
     })
   ]);
+
   /* =======================
      CHART DATA
   ======================== */
 
-  // Revenue (last 5 months)
-  const revenueChartData = await getMonthlyRevenueChart();
+  // Yearly revenue chart (quarterly: Q1, Q2, Q3, Q4)
+  const yearlyRevenueChartData = await getYearlyRevenueChart(currentYear);
 
-  // Active subscriptions trend
-  const subscriptionsChartData = await getSubscriptionsTrend(5);
+  // Active subscriptions proportion chart
+  const subscriptionsChartData = getSubscriptionsProportionChart(
+    activeSubscriptions,
+    inactiveSubscriptions
+  );
 
-  // Monthly revenue (weekly)
-  const monthlyRevenueChartData = await getWeeklyRevenueChart(liveMonthStart);
+  // Monthly revenue (4 weeks)
+  const monthlyRevenueChartData = await getWeeklyRevenueChart(currentMonthStart, currentMonthEnd);
 
   /* =======================
      FINAL RESPONSE
@@ -492,25 +641,25 @@ export const getSubscriptionDashboardStats = async () => {
     }),
   ])
 
-
   return {
     stats: {
-      totalRevenue: totalRevenue._sum.amount || 0,
+      yearlyRevenue: yearlyRevenue._sum.amount || 0,
       monthlyRevenue: thisMonthRevenue._sum.amount || 0,
-
       activeSubscriptions,
       totalSubscriptions,
       activePlans,
       totalPlans,
 
-      totalRevenueGrowth: calculateGrowth(
-        thisMonthRevenue._sum.amount || 0,
-        lastMonthRevenue._sum.amount || 0
+      yearlyRevenueGrowth: calculateGrowth(
+        yearlyRevenue._sum.amount || 0,
+        previousYearRevenue._sum.amount || 0,
+        true // Normalize negative to 0%
       ),
 
       monthlyRevenueGrowth: calculateGrowth(
         thisMonthRevenue._sum.amount || 0,
-        lastMonthRevenue._sum.amount || 0
+        lastMonthRevenue._sum.amount || 0,
+        true // Normalize negative to 0%
       ),
 
       activeSubscriptionsGrowth: calculateGrowth(
@@ -520,7 +669,7 @@ export const getSubscriptionDashboardStats = async () => {
     },
 
     charts: {
-      revenueChartData,
+      yearlyRevenueChartData,
       subscriptionsChartData,
       monthlyRevenueChartData
     }
@@ -529,73 +678,66 @@ export const getSubscriptionDashboardStats = async () => {
 
 
 
-const getMonthlyRevenueChart = async () => {
+/**
+ * Get yearly revenue chart data divided into 4 quarters
+ * Q1: Jan-Mar, Q2: Apr-Jun, Q3: Jul-Sep, Q4: Oct-Dec
+ */
+const getYearlyRevenueChart = async (year: number) => {
   const now = new Date();
   const data = [];
 
-  let periodEnd = now;
+  const quarters = [
+    { label: "Jan–Mar", startMonth: 0, endMonth: 2 },   // Q1
+    { label: "Apr–Jun", startMonth: 3, endMonth: 5 },   // Q2
+    { label: "Jul–Sep", startMonth: 6, endMonth: 8 },   // Q3
+    { label: "Oct–Dec", startMonth: 9, endMonth: 11 }   // Q4
+  ];
 
-  for (let block = 0; block < 4; block++) {
-    let blockRevenue = 0;
-    let blockStart: Date | null = null;
-    let blockEnd: Date | null = null;
+  for (const quarter of quarters) {
+    const quarterStart = new Date(year, quarter.startMonth, 1, 0, 0, 0, 0);
+    const quarterEnd = new Date(year, quarter.endMonth + 1, 0, 23, 59, 59, 999);
+    
+    // For current quarter, only count up to now
+    const endDate = now < quarterEnd ? now : quarterEnd;
 
-    for (let m = 0; m < 3; m++) {
-      const periodStart = getLiveMonthStart(periodEnd);
-
-      const revenue = await prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: {
-          status: "SUCCESS",
-          createdAt: {
-            gte: periodStart,
-            lt: periodEnd
-          }
+    const revenue = await prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        status: "SUCCESS",
+        isDeleted: false,
+        createdAt: {
+          gte: quarterStart,
+          lte: endDate
         }
-      });
+      }
+    });
 
-      blockRevenue += revenue._sum.amount || 0;
-
-      blockStart = periodStart;
-      blockEnd ??= periodEnd;
-
-      periodEnd = periodStart;
-    }
-
-    data.unshift({
-      label: `${blockStart!.toLocaleString("default", { month: "short" })} - ${blockEnd!.toLocaleString("default", { month: "short" })}`,
-      value: blockRevenue
+    data.push({
+      label: quarter.label,
+      value: revenue._sum.amount || 0
     });
   }
 
   return data;
 };
-const getSubscriptionsTrend = async (months: number) => {
-  const now = new Date();
-  const data = [];
 
-  let periodEnd = now;
-
-  for (let i = 0; i < months; i++) {
-    const periodStart = getLiveMonthStart(periodEnd);
-
-
-    const count = await prisma.userSubscription.count({
-      where: {
-        status: "ACTIVE",
-        createdAt: { lte: periodEnd }
-      }
-    });
-
-    data.push({
-      label: periodStart.toLocaleString("default", { month: "short" }),
-      value: count
-    });
-    periodEnd = periodStart;
-
-  }
-
-  return data;
+/**
+ * Get subscriptions proportion chart data (active vs inactive)
+ */
+const getSubscriptionsProportionChart = (
+  activeCount: number,
+  inactiveCount: number
+) => {
+  return [
+    {
+      label: "Active",
+      value: activeCount
+    },
+    {
+      label: "Inactive",
+      value: inactiveCount
+    }
+  ];
 };
 
 const getLiveMonthStart = (date: Date) => {
@@ -612,36 +754,62 @@ const getLiveMonthStart = (date: Date) => {
 };
 
 
-const getWeeklyRevenueChart = async (monthStart: Date) => {
+/**
+ * Get monthly revenue chart data divided into exactly 4 weeks
+ * Week 1: Days 1-7, Week 2: Days 8-14, Week 3: Days 15-21, Week 4: Days 22-end
+ */
+const getWeeklyRevenueChart = async (monthStart: Date, monthEnd: Date) => {
   const data = [];
   const now = new Date();
+  const actualEnd = now < monthEnd ? now : monthEnd;
 
-  let weekStart = new Date(monthStart);
+  // Calculate days in month
+  const daysInMonth = monthEnd.getDate();
+  
+  // Define week boundaries
+  const weekBoundaries = [
+    { start: 1, end: 7, label: "Week 1" },
+    { start: 8, end: 14, label: "Week 2" },
+    { start: 15, end: 21, label: "Week 3" },
+    { start: 22, end: daysInMonth, label: "Week 4" }
+  ];
 
-  for (let week = 0; week < 5; week++) {
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 7);
+  for (const week of weekBoundaries) {
+    const weekStart = new Date(monthStart);
+    weekStart.setDate(week.start);
+    
+    const weekEnd = new Date(monthStart);
+    weekEnd.setDate(Math.min(week.end, daysInMonth));
+    weekEnd.setHours(23, 59, 59, 999);
 
-    if (weekEnd > now) {
-      weekEnd.setTime(now.getTime());
+    // Don't count future weeks
+    if (weekStart > actualEnd) {
+      data.push({
+        label: week.label,
+        value: 0
+      });
+      continue;
     }
+
+    // Adjust end date if it's in the future
+    const endDate = weekEnd > actualEnd ? actualEnd : weekEnd;
 
     const revenue = await prisma.payment.aggregate({
       _sum: { amount: true },
       where: {
         status: "SUCCESS",
-        createdAt: { gte: weekStart, lte: weekEnd }
+        isDeleted: false,
+        createdAt: {
+          gte: weekStart,
+          lte: endDate
+        }
       }
     });
 
     data.push({
-      label: `Week ${week + 1}`,
+      label: week.label,
       value: revenue._sum.amount || 0
     });
-    weekStart = new Date(weekEnd);
-    weekStart.setDate(weekStart.getDate() + 1);
-
-    if (weekStart > now) break;
   }
 
   return data;
@@ -663,10 +831,6 @@ export const createStripeCheckoutSession = async ({
 }) => {
   try {
     const active = await getActiveSubscriptionForUser(userId);
-    if (active) {
-      throw new Error("An active subscription already exists. Please wait for it to expire or cancel at period end.");
-    }
-
     const plan = await prisma.subscriptionPlan.findUnique({
       where: { id: planId, isDeleted: false },
     });
@@ -678,6 +842,12 @@ export const createStripeCheckoutSession = async ({
     }
 
     if (!plan.stripePriceId) throw new Error("Stripe price not configured for this plan");
+
+    // Allow checkout if user has free plan (webhook will expire it when paid plan activates)
+    // Block checkout only if user has active paid subscription
+    if (active && !isFreePlan(active.plan)) {
+      throw new Error("An active paid subscription already exists. Please wait for it to expire or cancel at period end.");
+    }
 
     // 2. Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({

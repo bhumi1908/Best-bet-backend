@@ -36,7 +36,7 @@ export const getDrawHistories = async (req: Request, res: Response): Promise<voi
       search,
       stateId,
       drawTime,
-      fromDate:  fromDate ? new Date(fromDate) : undefined,
+      fromDate: fromDate ? new Date(fromDate) : undefined,
       toDate: toDate ? new Date(toDate) : undefined,
       sortBy: sortBy as 'drawDate' | 'winningNumbers',
       sortOrder,
