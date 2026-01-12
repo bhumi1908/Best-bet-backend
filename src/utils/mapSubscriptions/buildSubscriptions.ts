@@ -35,7 +35,10 @@ export const buildSubscriptionResponse = (
       })),
     },
 
-    payment: subscription.payment ?? null,
+    payment: subscription.payment ? {
+        ...subscription.payment,
+        amount: subscription.payment.amount ?? 0,
+    } : null,
 
     status: subscription.status as SubscriptionStatus,
 

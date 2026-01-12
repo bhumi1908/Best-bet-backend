@@ -31,18 +31,45 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
         if (!plan.isActive) {
             return sendError(res, "Plan is inactive", HttpStatus.BAD_REQUEST);
         }
+        // Check for existing active subscription
         const activeSubscription = await getActiveSubscriptionForUser(userId!);
-        if (activeSubscription && !hasUsedFreePlan(user)) {
-            return sendError(
-                res,
-                "You already have an active subscription. Please wait for it to expire or contact support.",
-                HttpStatus.FORBIDDEN
-            );
-        }
+        const isRequestedPlanFree = isFreePlan(plan);
+        const isRequestedPlanPaid = !isRequestedPlanFree;
 
-        if (isFreePlan(plan)) {
+        // If user has active subscription and requesting paid plan, allow checkout
+        // (the webhook will expire the free plan when paid plan activates)
+        if (activeSubscription && isRequestedPlanFree) {
+            // User already has active subscription and trying to get free plan
             if (hasUsedFreePlan(user)) {
                 return sendError(res, "Free plan already used", HttpStatus.FORBIDDEN);
+            }
+            // If current subscription is paid, don't allow free plan
+            if (!isFreePlan(activeSubscription.plan)) {
+                return sendError(
+                    res,
+                    "You already have an active paid subscription. Please cancel it first or wait for it to expire.",
+                    HttpStatus.FORBIDDEN
+                );
+            }
+        }
+
+        // Handle free plan activation (no checkout needed)
+        if (isRequestedPlanFree) {
+            if (hasUsedFreePlan(user)) {
+                return sendError(res, "Free plan already used", HttpStatus.FORBIDDEN);
+            }
+
+            // If user has active free plan, expire it first, then activate new free plan
+            if (activeSubscription && isFreePlan(activeSubscription.plan)) {
+                const now = new Date();
+                await prisma.userSubscription.update({
+                    where: { id: activeSubscription.id },
+                    data: {
+                        status: "EXPIRED",
+                        endDate: now,
+                        updatedAt: now,
+                    },
+                });
             }
 
             await activateFreeOrTrialPlan({ userId: user.id, plan });
@@ -111,16 +138,31 @@ export const getUserSubscription = async (req: Request, res: Response) => {
             return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
         }
 
-        if (subscription.endDate <= new Date() && subscription.status !== "EXPIRED") {
-            await prisma.userSubscription.update({
-                where: { id: subscription.id },
-                data: {
-                    status: "EXPIRED",
-                    updatedAt: new Date(),
-                    nextPlanId: null,
-                    scheduledChangeAt: null
-                },
-            });
+        const now = new Date();
+        // Check if subscription has expired
+        if (subscription.endDate <= now) {
+            // Only update if not already EXPIRED, REFUNDED, or REVOKED
+            if (subscription.status !== "EXPIRED" && subscription.status !== "REFUNDED") {
+                await prisma.userSubscription.update({
+                    where: { id: subscription.id },
+                    data: {
+                        status: "EXPIRED",
+                        updatedAt: now,
+                        nextPlanId: null,
+                        scheduledChangeAt: null
+                    },
+                });
+            }
+            return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
+        }
+
+        // Check if subscription is REFUNDED - these should not grant access
+        if (subscription.status === "REFUNDED") {
+            return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
+        }
+
+        // Check if subscription is CANCELED and has expired
+        if (subscription.status === "CANCELED" && subscription.endDate <= now) {
             return sendSuccess(res, null, "No active subscription found", HttpStatus.OK);
         }
 
@@ -136,9 +178,9 @@ export const getUserSubscription = async (req: Request, res: Response) => {
             plan: {
                 id: subscription.plan.id,
                 name: subscription.plan.name,
-                price: subscription.plan.price,
-                duration: subscription.plan.duration,
-                trialDays: subscription.plan.trialDays,
+                price: subscription.plan.price ?? 0,
+                duration: subscription.plan.duration ?? 0,
+                trialDays: subscription.plan.trialDays ?? 0,
                 description: subscription.plan.description,
                 features: subscription.plan.features
                     .filter(f => !f.isDeleted)
@@ -151,9 +193,9 @@ export const getUserSubscription = async (req: Request, res: Response) => {
             nextPlan: subscription.nextPlan ? {
                 id: subscription.nextPlan.id,
                 name: subscription.nextPlan.name,
-                price: subscription.nextPlan.price,
-                duration: subscription.nextPlan.duration,
-                trialDays: subscription.nextPlan.trialDays,
+                price: subscription.nextPlan.price ?? 0,
+                duration: subscription.nextPlan.duration ?? 0,
+                trialDays: subscription.nextPlan.trialDays ?? 0,
                 description: subscription.nextPlan.description,
                 features: subscription.nextPlan.features
                     .filter(f => !f.isDeleted)
@@ -166,7 +208,7 @@ export const getUserSubscription = async (req: Request, res: Response) => {
             lastPayment: subscription.payment
                 ? {
                     id: subscription.payment.id,
-                    amount: subscription.payment.amount,
+                    amount: subscription.payment.amount ?? 0,
                     status: subscription.payment.status,
                     paymentMethod: subscription.payment.paymentMethod,
                     createdAt: subscription.payment.createdAt
@@ -330,17 +372,23 @@ export const revokeUserSubscriptionAdmin = async (req: Request, res: Response) =
             await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
         }
 
-        // Update in DB
+        // Update in DB - Admin revoke immediately ends access
+        const now = new Date();
         await prisma.userSubscription.update({
             where: { id: subscription.id },
             data: {
                 status: "CANCELED",
-                endDate: new Date(),
-                updatedAt: new Date(),
+                endDate: now, // Immediate revocation
+                updatedAt: now,
+                nextPlanId: null,
+                scheduledChangeAt: null,
             },
         });
 
-        sendSuccess(res, null, "Subscription revoked successfully");
+        // Refresh subscription details for immediate UI update
+        const updatedSubscription = await getSubscriptionById(subscription.id);
+
+        sendSuccess(res, updatedSubscription, "Subscription revoked successfully");
     } catch (error: unknown) {
         sendError(res, error instanceof Error ? error.message : "Failed to revoke subscription", 500);
     }
@@ -373,7 +421,12 @@ export const changeUserSubscriptionPlan = async (req: Request, res: Response) =>
             return sendError(res, "Plan is inactive", 400);
         }
 
-        if (!userSubscription.user.stripeCustomerId) {
+        const hadStripeSubscription = !!userSubscription.stripeSubscriptionId;
+
+        // Only require Stripe customer ID for paid plan changes that involve Stripe subscriptions
+        // Admin can grant paid plans without Stripe (no payment required)
+        // But if changing PAID → PAID, we need Stripe customer ID to update the subscription
+        if (hadStripeSubscription && !isFreePlan(newPlan) && !userSubscription.user.stripeCustomerId) {
             return sendError(res, "User does not have a Stripe customer ID", 400);
         }
 
@@ -382,120 +435,181 @@ export const changeUserSubscriptionPlan = async (req: Request, res: Response) =>
         }
 
         const now = new Date();
-        const hasRunningPaid = userSubscription.stripeSubscriptionId && userSubscription.endDate > now;
-        if (hasRunningPaid && !isFreePlan(userSubscription.plan)) {
-            return sendError(res, "Plan change will start after current period. Please retry after expiry or cancel at period end.", 400);
-        }
-
-        if (userSubscription.stripeSubscriptionId) {
-            await stripe.subscriptions.update(userSubscription.stripeSubscriptionId, {
-                cancel_at_period_end: false,
-                proration_behavior: "always_invoice",
-            });
-        }
-
         const isNewPlanFree = isFreePlan(newPlan);
-        const hadStripeSubscription = !!userSubscription.stripeSubscriptionId;
+        const isCurrentPlanFree = isFreePlan(userSubscription.plan);
 
-        // ADMIN: PAID → FREE
-        if (hadStripeSubscription && isNewPlanFree) {
-            await stripe.subscriptions.cancel(
-                userSubscription.stripeSubscriptionId!,
-                {
-                    invoice_now: false,
-                    prorate: false,
+
+        // ADMIN PLAN CHANGE: Expire old plan immediately, activate new plan immediately
+        // Use transaction to ensure atomicity
+        const result = await prisma.$transaction(async (tx) => {
+            // Step 1: Handle Stripe subscription if exists
+            if (hadStripeSubscription && userSubscription.stripeSubscriptionId) {
+                if (isNewPlanFree) {
+                    // PAID → FREE: Cancel Stripe subscription and expire current
+                    await stripe.subscriptions.cancel(
+                        userSubscription.stripeSubscriptionId,
+                        {
+                            invoice_now: false,
+                            prorate: false,
+                        }
+                    );
+
+                    // Expire current and create new free plan
+                    await tx.userSubscription.update({
+                        where: { id: userSubscription.id },
+                        data: {
+                            status: "EXPIRED",
+                            endDate: now,
+                            updatedAt: now,
+                            nextPlanId: null,
+                            scheduledChangeAt: null,
+                        },
+                    });
+
+                    const startDate = new Date();
+                    let endDate = new Date(startDate);
+                    if (newPlan.trialDays && newPlan.trialDays > 0) {
+                        endDate.setDate(endDate.getDate() + newPlan.trialDays);
+                    } else if (newPlan.duration && newPlan.duration > 0) {
+                        endDate.setMonth(endDate.getMonth() + newPlan.duration);
+                    } else {
+                        endDate.setFullYear(endDate.getFullYear() + 100);
+                    }
+
+                    const newSubscription = await tx.userSubscription.create({
+                        data: {
+                            userId: userSubscription.userId,
+                            planId: newPlan.id,
+                            startDate,
+                            endDate,
+                            stripeSubscriptionId: null,
+                            status: newPlan.trialDays && newPlan.trialDays > 0 ? "TRIAL" : "ACTIVE",
+                        },
+                        include: {
+                            user: true,
+                            plan: { include: { features: true } },
+                            payment: true,
+                        },
+                    });
+
+                    if (newPlan.trialDays && newPlan.trialDays > 0) {
+                        await tx.user.update({
+                            where: { id: userSubscription.userId },
+                            data: { isTrial: true },
+                        });
+                    }
+
+                    return newSubscription;
+                } else {
+                    // PAID → PAID: Update existing subscription (same Stripe subscription)
+                    if (!newPlan.stripePriceId) {
+                        throw new Error("Invalid paid plan - missing Stripe price ID");
+                    }
+
+                    const stripeSub = await stripe.subscriptions.retrieve(
+                        userSubscription.stripeSubscriptionId
+                    );
+
+                    await stripe.subscriptions.update(stripeSub.id, {
+                        cancel_at_period_end: false,
+                        proration_behavior: "always_invoice",
+                        items: [
+                            {
+                                id: stripeSub.items.data[0].id,
+                                price: newPlan.stripePriceId,
+                            },
+                        ],
+                    });
+
+                    // Update existing subscription to new plan immediately
+                    const updatedSubscription = await tx.userSubscription.update({
+                        where: { id: userSubscription.id },
+                        data: {
+                            planId: newPlan.id,
+                            status: "ACTIVE",
+                            updatedAt: now,
+                            nextPlanId: null,
+                            scheduledChangeAt: null,
+                        },
+                        include: {
+                            user: true,
+                            plan: { include: { features: true } },
+                            payment: true,
+                        },
+                    });
+
+                    return updatedSubscription;
                 }
-            );
-
-            const updatedSubscription = await prisma.userSubscription.update({
-                where: { id: userSubscription.id },
-                data: {
-                    planId: newPlan.id,
-                    stripeSubscriptionId: null,
-                    status: "TRIAL",
-                    updatedAt: new Date(),
-                },
-                include: {
-                    user: true,
-                    plan: { include: { features: true } },
-                    payment: true,
-                },
-            });
-
-            return sendSuccess(
-                res,
-                buildSubscriptionResponse(updatedSubscription),
-                "User moved to FREE plan successfully"
-            );
-        }
-
-        //  * ADMIN: PAID → PAID
-        if (hadStripeSubscription && !isNewPlanFree) {
-            if (!newPlan.stripePriceId) {
-                return sendError(res, "Invalid paid plan", 400);
-            }
-
-            const stripeSub = await stripe.subscriptions.retrieve(
-                userSubscription.stripeSubscriptionId!
-            );
-
-            await stripe.subscriptions.update(stripeSub.id, {
-                cancel_at_period_end: false,
-                proration_behavior: "always_invoice",
-                items: [
-                    {
-                        id: stripeSub.items.data[0].id,
-                        price: newPlan.stripePriceId,
+            } else {
+                // FREE → FREE or FREE → PAID (no Stripe subscription)
+                // Expire current and create new
+                await tx.userSubscription.update({
+                    where: { id: userSubscription.id },
+                    data: {
+                        status: "EXPIRED",
+                        endDate: now,
+                        updatedAt: now,
+                        nextPlanId: null,
+                        scheduledChangeAt: null,
                     },
-                ],
-            });
+                });
 
-            const updatedSubscription = await prisma.userSubscription.update({
-                where: { id: userSubscription.id },
-                data: {
-                    planId: newPlan.id,
-                    updatedAt: new Date(),
-                },
-                include: {
-                    user: true,
-                    plan: { include: { features: true } },
-                    payment: true,
-                },
-            });
+                const startDate = new Date();
+                let endDate = new Date(startDate);
 
-            return sendSuccess(
-                res,
-                buildSubscriptionResponse(updatedSubscription),
-                "Subscription plan changed successfully"
-            );
-        }
+                if (isNewPlanFree) {
+                    if (newPlan.trialDays && newPlan.trialDays > 0) {
+                        endDate.setDate(endDate.getDate() + newPlan.trialDays);
+                    } else if (newPlan.duration && newPlan.duration > 0) {
+                        endDate.setMonth(endDate.getMonth() + newPlan.duration);
+                    } else {
+                        endDate.setFullYear(endDate.getFullYear() + 100);
+                    }
+                } else {
+                    // FREE → PAID: Admin can grant paid plan without payment
+                    // Create subscription with stripeSubscriptionId: null (no Stripe billing)
+                    if (newPlan.duration && newPlan.duration > 0) {
+                        endDate.setMonth(endDate.getMonth() + newPlan.duration);
+                    } else {
+                        endDate.setMonth(endDate.getMonth() + 1); // Default 1 month
+                    }
+                }
 
-        //  * ADMIN: FREE → FREE
-        const stripeSubscription = await stripe.subscriptions.create({
-            customer: userSubscription.user.stripeCustomerId!,
-            items: [{ price: newPlan.stripePriceId! }],
-            payment_behavior: "default_incomplete",
-            expand: ["latest_invoice.payment_intent"],
-            trial_period_days: newPlan.trialDays ?? undefined,
+                const newSubscription = await tx.userSubscription.create({
+                    data: {
+                        userId: userSubscription.userId,
+                        planId: newPlan.id,
+                        startDate,
+                        endDate,
+                        stripeSubscriptionId: isNewPlanFree ? null : null, // No Stripe subscription for admin-granted plans (free or paid)
+                        status: isNewPlanFree
+                            ? (newPlan.trialDays && newPlan.trialDays > 0 ? "TRIAL" : "ACTIVE")
+                            : "ACTIVE", // Admin-granted paid plan is immediately ACTIVE
+                    },
+                    include: {
+                        user: true,
+                        plan: { include: { features: true } },
+                        payment: true,
+                    },
+                });
+
+                if (isNewPlanFree && newPlan.trialDays && newPlan.trialDays > 0) {
+                    await tx.user.update({
+                        where: { id: userSubscription.userId },
+                        data: { isTrial: true },
+                    });
+                }
+
+                return newSubscription;
+            }
         });
 
-
-        const updatedSubscription = await prisma.userSubscription.update({
-            where: { id: userSubscription.id },
-            data: {
-                planId: newPlan.id,
-                stripeSubscriptionId: stripeSubscription.id,
-                updatedAt: new Date(),
-                status: "ACTIVE",
-            },
-            include: {
-                user: true,
-                plan: { include: { features: true } },
-                payment: true,
-            },
-        });
-
-        sendSuccess(res, buildSubscriptionResponse(updatedSubscription), "Subscription plan changed successfully");
+        const formattedSubscription = await getSubscriptionById(result.id);
+        return sendSuccess(
+            res,
+            formattedSubscription,
+            "Subscription plan changed successfully"
+        );
     } catch (error: unknown) {
         console.error("Error changing subscription plan:", error);
         sendError(
@@ -537,16 +651,34 @@ export const refundSubscriptionPaymentAdmin = async (req: Request, res: Response
             },
         });
 
+        // Update subscription status to REFUNDED and immediately revoke access
+        let updatedSubscription: Subscription | null = null;
         if (payment.subscription && payment.subscription.length > 0) {
+            const now = new Date();
             for (const sub of payment.subscription) {
                 await prisma.userSubscription.update({
                     where: { id: sub.id },
-                    data: { status: "REFUNDED" },
+                    data: {
+                        status: "REFUNDED",
+                        endDate: now, // Immediate access revocation
+                        updatedAt: now,
+                        nextPlanId: null,
+                        scheduledChangeAt: null,
+                    },
                 });
             }
+            // Get updated subscription for response
+            updatedSubscription = await getSubscriptionById(payment.subscription[0].id);
         }
 
-        sendSuccess(res, refundRecord, "Refund processed successfully");
+        // Return refund data with subscription info for immediate UI update
+        const refundResponse = {
+            ...refundRecord,
+            userId: payment.userId,
+            subscription: updatedSubscription,
+        };
+
+        return sendSuccess(res, refundResponse, "Refund processed successfully");
     } catch (error: unknown) {
         sendError(res, error instanceof Error ? error.message : "Failed to process refund", 500);
     }
@@ -562,6 +694,31 @@ export const revokeUserSubscriptionSelf = async (req: Request, res: Response) =>
             orderBy: { createdAt: "desc" },
         });
 
+        if (!subscription) {
+            return sendError(res, "Subscription not found", 404);
+        }
+        if (subscription.status === "TRIAL") {
+            // delete payment if exists
+            if (subscription.paymentId) {
+                await prisma.payment.delete({
+                    where: { id: subscription.paymentId },
+                });
+            }
+
+            const canceledTrial = await prisma.userSubscription.update({
+                where: { id: subscription.id },
+                data: {
+                    status: "CANCELED",
+                    updatedAt: new Date(),
+                    nextPlanId: null,
+                    scheduledChangeAt: null,
+                },
+                include: {
+                    plan: { include: { features: true } },
+                },
+            });
+            return sendSuccess(res, canceledTrial, "Trial subscription canceled successfully");
+        }
         if (!subscription?.stripeSubscriptionId) return sendError(res, "Active subscription not found", 404);
 
         const stripeSub = await stripe.subscriptions.retrieve(
@@ -585,13 +742,6 @@ export const revokeUserSubscriptionSelf = async (req: Request, res: Response) =>
 
             return sendSuccess(res, null, "Subscription already scheduled to cancel");
         }
-
-
-        // If user has a trial with payment, delete the payment
-        if (subscription.status === "TRIAL" && subscription.paymentId) {
-            await prisma.payment.delete({ where: { id: subscription.paymentId } });
-        }
-
         // If ACTIVE with Stripe, cancel at period end
         if (stripeSub.status === "active" && !stripeSub.cancel_at_period_end) {
             await stripe.subscriptions.update(stripeSub.id, {
@@ -599,15 +749,26 @@ export const revokeUserSubscriptionSelf = async (req: Request, res: Response) =>
             });
         }
 
-        // Update subscription in DB
+        // Update subscription in DB - User self-cancel keeps access until period end
+        const now = new Date();
         const updateSubscriptions = await prisma.userSubscription.update({
             where: { id: subscription.id },
             data: {
                 status: "CANCELED",
-                updatedAt: new Date(),
+                updatedAt: now,
                 nextPlanId: null,
                 scheduledChangeAt: null,
+                // Keep endDate unchanged - user keeps access until period end
             },
+            include: {
+                plan: {
+                    include: { features: true }
+                },
+                nextPlan: {
+                    include: { features: true }
+                },
+                payment: true
+            }
         });
 
         return sendSuccess(res, updateSubscriptions, "Subscription canceled at period end");
@@ -648,10 +809,9 @@ export const changeUserSubscriptionPlanSelf = async (req: Request, res: Response
             return sendError(res, "Plan not found", HttpStatus.NOT_FOUND);
         }
 
-        const isFreePlan =
-            (newPlan?.trialDays ?? 0) > 0 || newPlan.price === 0;
+        const isFreePlans = isFreePlan(newPlan);
 
-        if (isFreePlan) {
+        if (isFreePlans) {
             // Check if user has already used a free/trial plan
             const userSubscriptions = await prisma.userSubscription.findMany({
                 where: {
@@ -703,17 +863,28 @@ export const changeUserSubscriptionPlanSelf = async (req: Request, res: Response
             }
         });
 
+        const isCurrentPlanFree = currentSubscription ? isFreePlan(currentSubscription.plan) : false;
+
+        // If user is on FREE plan and trying to switch to PAID plan, they must use checkout
+        if (currentSubscription && isCurrentPlanFree && !isFreePlan) {
+            return sendError(
+                res,
+                "To upgrade from a free plan to a paid plan, please use the checkout process. Your free plan will be automatically replaced when payment is successful.",
+                HttpStatus.BAD_REQUEST
+            );
+        }
+
         if (!currentSubscription) {
             // If no active subscription, user is subscribing for the first time
             // For free plans, create subscription immediately
-            if (isFreePlan) {
+            if (isFreePlans) {
                 const startDate = new Date();
                 let endDate = new Date(startDate);
 
                 if ((newPlan?.trialDays ?? 0) > 0) {
                     endDate.setDate(endDate.getDate() + (newPlan?.trialDays ?? 0));
-                } else if ((newPlan?.trialDays ?? 0) > 0) {
-                    endDate.setMonth(endDate.getMonth() + (newPlan?.trialDays ?? 0));
+                } else if ((newPlan?.duration ?? 0) > 0) {
+                    endDate.setMonth(endDate.getMonth() + (newPlan?.duration ?? 0));
                 } else {
                     // Free forever plan
                     endDate.setFullYear(endDate.getFullYear() + 100); // Far future
@@ -771,7 +942,13 @@ export const changeUserSubscriptionPlanSelf = async (req: Request, res: Response
             return sendError(res, "You already have a scheduled change to this plan", HttpStatus.BAD_REQUEST);
         }
 
-        // Schedule the plan change for end of current period
+        // User self plan change: Only allow scheduling for PAID → PAID or PAID → FREE
+        // FREE → PAID must go through checkout (already handled above)
+
+        // If current plan is paid and new plan is also paid, schedule the change
+        // If current plan is paid and new plan is free, schedule the change
+        // Both will happen at period end to maintain access continuity
+
         const updatedSubscription = await prisma.userSubscription.update({
             where: { id: currentSubscription.id },
             data: {

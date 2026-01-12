@@ -7,6 +7,10 @@ type PaymentStatus =
   "FAILED" |
   "REFUNDED"  
 
+export interface State {
+  id: number
+  name: string
+}
 
 export interface Subscription {
   subscriptionId: number
@@ -28,7 +32,10 @@ export interface User {
   stripeCustomerId: string | null
   createdAt: Date
   isTrial ?: boolean
+  state: State | null
 }
+
+
 
 export interface Plan {
   id: number
