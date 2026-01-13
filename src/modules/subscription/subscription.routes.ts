@@ -21,7 +21,7 @@ router.post(
 /**
  * Get current user's subscription details
  */
-router.get("/me/subscription", authenticateToken, getUserSubscription);
+router.get("/me", authenticateToken, getUserSubscription);
 
 // Cancel subscription (at period end)
 router.post("/me/revoke", authenticateToken, revokeUserSubscriptionSelf);

@@ -378,7 +378,6 @@ export const revokeUserSubscriptionAdmin = async (req: Request, res: Response) =
             where: { id: subscription.id },
             data: {
                 status: "CANCELED",
-                endDate: now, // Immediate revocation
                 updatedAt: now,
                 nextPlanId: null,
                 scheduledChangeAt: null,
