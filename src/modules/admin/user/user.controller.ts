@@ -53,6 +53,13 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
           phoneNo: true,
           role: true,
           isInactive: true,
+          state: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
           createdAt: true,
           updatedAt: true,
           subscriptions: {

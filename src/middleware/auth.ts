@@ -11,7 +11,8 @@ declare global {
       user?: {
         id: number;
         email: string;
-        role: Role
+        role: Role;
+        state?: { id: number; name: string; code: string | null } | null;
       };
     }
   }
@@ -21,6 +22,7 @@ export interface JWTPayload {
   id: number;
   email: string;
   role: UserRole
+  state?: { id: number; name: string; code: string | null } | null;
 }
 
 
@@ -67,7 +69,14 @@ export const authenticateToken = async (
           id: true,
           email: true,
           isInactive: true,
-          role: true
+          role: true,
+          state: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
         },
       });
 
@@ -94,14 +103,15 @@ export const authenticateToken = async (
       req.user = {
         id: user.id,
         email: user.email,
-        role: user.role
+        role: user.role,
+        state: user?.state || null,
       };
 
       next();
-    } catch (jwtError:any) {
+    } catch (jwtError: any) {
       // THIS IS THE KEY PART - Must return 401 for expired tokens
       console.log('❌ Token verification failed:', jwtError.message);
-      
+
       if (jwtError instanceof jwt.TokenExpiredError) {
         console.log('⏰ Token expired - returning 401 to trigger refresh');
         res.status(401).json({
@@ -110,7 +120,7 @@ export const authenticateToken = async (
         });
         return;
       }
-      
+
       res.status(403).json({
         status: 'error',
         message: 'Invalid token',
