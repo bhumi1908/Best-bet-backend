@@ -197,7 +197,7 @@ model GameHistory {
   drawDate       DateTime         @map("draw_date") @db.Timestamptz(6)
   drawTime       DrawTime         @map("draw_time")
   winningNumbers String           @map("winning_numbers")
-  resultStatus   GameResultStatus @default(PENDING) @map("result_status")
+  resultStatus   GameResultStatus @default(WIN) @map("result_status")
   totalWinners   Int              @default(0) @map("total_winners")
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
