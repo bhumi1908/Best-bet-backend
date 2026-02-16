@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import prisma from "../config/prisma";
 import stripe from "../config/stripe";
+
 /**
  * =====================================================
  * EXPIRE SUBSCRIPTIONS (Safety Net)
@@ -9,8 +10,8 @@ import stripe from "../config/stripe";
  * - Expires ACTIVE / TRIAL subscriptions
  * - Only if Stripe subscription is no longer active
  */
-cron.schedule("*/5 * * * *", async () => {
-    console.log(" Cron: Expire subscriptions");
+export function initializeSubscriptionExpireScheduler(): void {
+  cron.schedule("*/15 * * * *", async () => {
 
     const now = new Date();
 
@@ -73,7 +74,7 @@ cron.schedule("*/5 * * * *", async () => {
  * - Moves CANCELED → EXPIRED after period end
  */
 cron.schedule("*/30 * * * *", async () => {
-    console.log(" Cron: Cleanup canceled subscriptions");
+    console.log("Scheduler: Cleanup canceled subscriptions");
 
     await prisma.userSubscription.updateMany({
         where: {
@@ -98,7 +99,7 @@ cron.schedule("*/30 * * * *", async () => {
  * - DB updates happen ONLY via webhook
  */
 cron.schedule("*/15 * * * *", async () => {
-    console.log(" Cron: Process scheduled plan changes");
+    console.log("Scheduler: Process scheduled plan changes");
 
     const now = new Date();
 
@@ -198,4 +199,5 @@ cron.schedule("*/15 * * * *", async () => {
     }
 });
 
-console.log("Subscription cron jobs initialized");
+console.log("Subscription schedulers initialized");
+}

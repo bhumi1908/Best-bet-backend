@@ -26,13 +26,19 @@ export const createGameHistorySchema = Joi.object({
     'string.base': 'Winning numbers must be a string',
     'any.required': 'Winning numbers is required',
   }),
-  result: Joi.string().valid('WIN', 'LOSS', 'PENDING').default('PENDING').messages({
-    'any.only': 'Result must be WIN, LOSS, or PENDING',
-  }),
-  prize_amount: Joi.number().min(0).precision(2).optional().default(0.00).messages({
-    'number.base': 'Prize amount must be a number',
-    'number.min': 'Prize amount cannot be negative',
-  }),
+  // COMMENTED OUT: Result Status flow
+  // result: Joi.string().valid('WIN', 'LOSS', 'PENDING').default('PENDING').messages({
+  //   'any.only': 'Result must be WIN, LOSS, or PENDING',
+  // }),
+  prize_amount: Joi.number()
+    .min(0)
+    .precision(2)
+    .optional()
+    .allow(null)
+    .messages({
+      'number.base': 'Prize amount must be a number',
+      'number.min': 'Prize amount cannot be negative',
+    }),
 });
 
 // Update game history validation
@@ -56,13 +62,19 @@ export const updateGameHistorySchema = Joi.object({
   winning_numbers: Joi.string().trim().optional().messages({
     'string.base': 'Winning numbers must be a string',
   }),
-  result: Joi.string().valid('WIN', 'LOSS', 'PENDING').optional().messages({
-    'any.only': 'Result must be WIN, LOSS, or PENDING',
-  }),
-  prize_amount: Joi.number().min(0).precision(2).optional().messages({
-    'number.base': 'Prize amount must be a number',
-    'number.min': 'Prize amount cannot be negative',
-  }),
+  // COMMENTED OUT: Result Status flow
+  // result: Joi.string().valid('WIN', 'LOSS', 'PENDING').optional().messages({
+  //   'any.only': 'Result must be WIN, LOSS, or PENDING',
+  // }),
+  prize_amount: Joi.number()
+    .min(0)
+    .precision(2)
+    .optional()
+    .allow(null)
+    .messages({
+      'number.base': 'Prize amount must be a number',
+      'number.min': 'Prize amount cannot be negative',
+    }),
 });
 
 // Query parameters validation for GET /api/game-histories
@@ -81,17 +93,18 @@ export const getGameHistoriesQuerySchema = Joi.object({
   search: Joi.string().trim().optional().messages({
     'string.base': 'Search must be a string',
   }),
-  result: Joi.string().valid('WIN', 'LOSS', 'PENDING').optional().messages({
-    'any.only': 'Result filter must be WIN, LOSS, or PENDING',
-  }),
+  // COMMENTED OUT: Result Status flow
+  // result: Joi.string().valid('WIN', 'LOSS', 'PENDING').optional().messages({
+  //   'any.only': 'Result filter must be WIN, LOSS, or PENDING',
+  // }),
   fromDate: Joi.date().optional().messages({
     'date.base': 'From date must be a valid date',
   }),
   toDate: Joi.date().optional().messages({
     'date.base': 'To date must be a valid date',
   }),
-  sortBy: Joi.string().valid('drawDate', 'resultStatus', 'createdAt').optional().default('drawDate').messages({
-    'any.only': 'Sort by must be drawDate, resultStatus, or createdAt',
+  sortBy: Joi.string().valid('drawDate', /* 'resultStatus', */ 'createdAt').optional().default('drawDate').messages({
+    'any.only': 'Sort by must be drawDate or createdAt',
   }),
   sortOrder: Joi.string().valid('asc', 'desc').optional().default('desc').messages({
     'any.only': 'Sort order must be asc or desc',

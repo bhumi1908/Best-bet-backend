@@ -34,6 +34,7 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
         { firstName: { contains: search, mode: 'insensitive' } },
         { lastName: { contains: search, mode: 'insensitive' } },
         { phoneNo: { contains: search, mode: 'insensitive' } },
+        { state: { name: { contains: search, mode: 'insensitive' } } },
       ];
     }
 

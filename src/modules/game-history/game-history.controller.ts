@@ -2,30 +2,42 @@ import { Request, Response } from 'express';
 import { sendSuccess, sendError } from '../../utils/helpers/response';
 import { HttpStatus } from '../../utils/constants/enums';
 import * as gameHistoryService from './game-history.service';
+import { recomputePredictionsForState, checkIfDrawMatchesPrediction } from '../../services/prediction.service';
 
 // Helper function to format game history response
-const formatGameHistoryResponse = (history: any) => ({
-  id: history.id,
-  state_id: history.stateId,
-  state_name: history.state.name,
-  state_code: history.state.code,
-  game_id: history.gameTypeId,
-  game_name: history.gameType.name,
-  game_code: history.gameType.code,
-  draw_date: history.drawDate,
-  draw_time: history.drawTime,
-  winning_numbers: history.winningNumbers,
-  result: history.resultStatus,
-  total_winners: history.totalWinners,
-  prize_amount: history.prizeAmount?.toNumber() || 0,
-  created_at: history.createdAt,
-  updated_at: history.updatedAt,
-});
+const formatGameHistoryResponse = async (history: any) => {
+  // Check if this draw matches a prediction (exact draw date and draw time)
+  const isPredicted = await checkIfDrawMatchesPrediction(
+    history.stateId,
+    history.drawDate,
+    history.drawTime as 'MID' | 'EVE',
+    history.winningNumbers
+  );
+
+  return {
+    id: history.id,
+    state_id: history.stateId,
+    state_name: history.state.name,
+    state_code: history.state.code,
+    game_id: history.gameTypeId,
+    game_name: history.gameType.name,
+    game_code: history.gameType.code,
+    draw_date: history.drawDate,
+    draw_time: history.drawTime,
+    winning_numbers: history.winningNumbers,
+    result: history.resultStatus,
+    total_winners: history.totalWinners,
+    prize_amount: history.prizeAmount?.toNumber() || 0,
+    is_predicted: isPredicted,
+    created_at: history.createdAt,
+    updated_at: history.updatedAt,
+  };
+};
 
 // POST /api/game-history - Create game history
 export const createGameHistory = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { state_id, game_id, draw_date, draw_time, winning_numbers, result, prize_amount } = req.body;
+    const { state_id, game_id, draw_date, draw_time, winning_numbers, /* result, */ prize_amount } = req.body;
 
     const gameHistory = await gameHistoryService.createGameHistory({
       state_id,
@@ -33,18 +45,27 @@ export const createGameHistory = async (req: Request, res: Response): Promise<vo
       draw_date,
       draw_time,
       winning_numbers,
-      result,
+      // COMMENTED OUT: Result Status flow
+      // result,
       prize_amount,
     });
 
+    try {
+      // Admin action: update latest prediction
+      await recomputePredictionsForState(gameHistory.stateId, true);
+    } catch (err) {
+      console.error(`[GameHistoryController] Failed to recompute predictions for stateId=${gameHistory.stateId}:`, err);
+      // Do not fail the create API if prediction generation fails
+    }
+
+    const formattedHistory = await formatGameHistoryResponse(gameHistory);
     sendSuccess(
       res,
-      formatGameHistoryResponse(gameHistory),
+      formattedHistory,
       'Game history created successfully',
       HttpStatus.CREATED
     );
   } catch (error: any) {
-    console.error('Create game history error:', error);
 
     if (error?.code === 'P2002') {
       sendError(
@@ -88,7 +109,7 @@ export const createGameHistory = async (req: Request, res: Response): Promise<vo
 export const updateGameHistory = async (req: Request, res: Response): Promise<void> => {
   try {
     const gameHistoryId = parseInt(req.params.gameHistoryId);
-    const { state_id, game_id, draw_date, draw_time, winning_numbers, result, prize_amount } = req.body;
+    const { state_id, game_id, draw_date, draw_time, winning_numbers, /* result, */ prize_amount } = req.body;
 
     if (isNaN(gameHistoryId)) {
       sendError(res, 'Invalid game history ID', HttpStatus.BAD_REQUEST);
@@ -101,13 +122,23 @@ export const updateGameHistory = async (req: Request, res: Response): Promise<vo
       draw_date,
       draw_time,
       winning_numbers,
-      result,
+      // COMMENTED OUT: Result Status flow
+      // result,
       prize_amount,
     });
 
+    try {
+      // Admin action: update latest prediction
+      await recomputePredictionsForState(updatedHistory.stateId, true);
+    } catch (err) {
+      console.error(`[GameHistoryController] Failed to recompute predictions for stateId=${updatedHistory.stateId}:`, err);
+      // Do not fail the update API if prediction generation fails
+    }
+
+    const formattedHistory = await formatGameHistoryResponse(updatedHistory);
     sendSuccess(
       res,
-      formatGameHistoryResponse(updatedHistory),
+      formattedHistory,
       'Game history updated successfully'
     );
   } catch (error: any) {
@@ -162,7 +193,8 @@ export const getGameHistories = async (req: Request, res: Response): Promise<voi
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const search = req.query.search as string | undefined;
-    const result = req.query.result as string | undefined;
+    // COMMENTED OUT: Result Status flow
+    // const result = req.query.result as string | undefined;
     const fromDate = req.query.fromDate as string | undefined;
     const toDate = req.query.toDate as string | undefined;
     const sortBy = (req.query.sortBy as string) || 'drawDate';
@@ -170,10 +202,11 @@ export const getGameHistories = async (req: Request, res: Response): Promise<voi
 
     const filters: gameHistoryService.GameHistoryFilters = {
       search,
-      result: result as 'WIN' | 'LOSS' | 'PENDING' | undefined,
+      // COMMENTED OUT: Result Status flow
+      // result: result as 'WIN' | 'LOSS' | 'PENDING' | undefined,
       fromDate: fromDate ? new Date(fromDate) : undefined,
       toDate: toDate ? new Date(toDate) : undefined,
-      sortBy: sortBy as 'drawDate' | 'resultStatus' | 'createdAt',
+      sortBy: sortBy as 'drawDate' | /* 'resultStatus' | */ 'createdAt',
       sortOrder,
     };
 
@@ -182,8 +215,10 @@ export const getGameHistories = async (req: Request, res: Response): Promise<voi
       { page, limit }
     );
 
-    // Format response
-    const formattedHistories = gameHistories.map(formatGameHistoryResponse);
+    // Format response and check predictions (in parallel for better performance)
+    const formattedHistories = await Promise.all(
+      gameHistories.map(history => formatGameHistoryResponse(history))
+    );
 
     sendSuccess(
       res,
@@ -199,8 +234,6 @@ export const getGameHistories = async (req: Request, res: Response): Promise<voi
       'Game histories retrieved successfully'
     );
   } catch (error: any) {
-    console.error('Get game histories error:', error);
-
     if (error?.code === 'ECONNREFUSED' || error?.code === 'P1001') {
       sendError(
         res,
@@ -230,14 +263,13 @@ export const getGameHistoryById = async (req: Request, res: Response): Promise<v
 
     const gameHistory = await gameHistoryService.getGameHistoryById(gameHistoryId);
 
+    const formattedHistory = await formatGameHistoryResponse(gameHistory);
     sendSuccess(
       res,
-      formatGameHistoryResponse(gameHistory),
+      formattedHistory,
       'Game history retrieved successfully'
     );
   } catch (error: any) {
-    console.error('Get game history by ID error:', error);
-
     if (error?.code === 'P2025') {
       sendError(res, 'Game history not found', HttpStatus.NOT_FOUND);
       return;
@@ -276,7 +308,14 @@ export const deleteGameHistory = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    await gameHistoryService.deleteGameHistory(gameHistoryId);
+    const gameHistory = await gameHistoryService.deleteGameHistory(gameHistoryId);
+
+    try {
+      // Admin action: update latest prediction
+      await recomputePredictionsForState(gameHistory.stateId, true);
+    } catch (err) {
+      // Silently fail - prediction will be generated on next cron run
+    }
 
     sendSuccess(
       res,
@@ -284,8 +323,6 @@ export const deleteGameHistory = async (req: Request, res: Response): Promise<vo
       'Game history deleted successfully'
     );
   } catch (error: any) {
-    console.error('Delete game history error:', error);
-
     if (error?.code === 'P2025') {
       sendError(res, 'Game history not found', HttpStatus.NOT_FOUND);
       return;
@@ -313,4 +350,3 @@ export const deleteGameHistory = async (req: Request, res: Response): Promise<vo
     );
   }
 };
-

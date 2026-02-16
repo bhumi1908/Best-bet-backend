@@ -7,7 +7,8 @@ export interface CreateGameHistoryData {
   draw_date: Date;
   draw_time: 'MID' | 'EVE';
   winning_numbers: string;
-  result?: 'WIN' | 'LOSS' | 'PENDING';
+  // COMMENTED OUT: Result Status flow
+  // result?: 'WIN' | 'LOSS' | 'PENDING';
   prize_amount?: number;
 }
 
@@ -17,16 +18,18 @@ export interface UpdateGameHistoryData {
   draw_date?: Date;
   draw_time?: 'MID' | 'EVE';
   winning_numbers?: string;
-  result?: 'WIN' | 'LOSS' | 'PENDING';
+  // COMMENTED OUT: Result Status flow
+  // result?: 'WIN' | 'LOSS' | 'PENDING';
   prize_amount?: number;
 }
 
 export interface GameHistoryFilters {
   search?: string;
-  result?: 'WIN' | 'LOSS' | 'PENDING';
+  // COMMENTED OUT: Result Status flow
+  // result?: 'WIN' | 'LOSS' | 'PENDING';
   fromDate?: Date;
   toDate?: Date;
-  sortBy?: 'drawDate' | 'resultStatus' | 'createdAt';
+  sortBy?: 'drawDate' | /* 'resultStatus' | */ 'createdAt';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -115,29 +118,9 @@ export const createGameHistory = async (data: CreateGameHistoryData) => {
     throw new Error(gameTypeValidation.error);
   }
 
-  // Normalize draw date (should already be parsed in controller as local timezone date)
-  // Ensure it's at start of day (00:00:00) in local timezone
-  // const drawDate = data.draw_date instanceof Date
-  //   ? new Date(data.draw_date.getFullYear(), data.draw_date.getMonth(), data.draw_date.getDate(), 0, 0, 0, 0)
-  //   : (() => {
-  //     // Fallback: parse string if somehow it's not a Date (shouldn't happen after controller fix)
-  //     const parsed = new Date(data.draw_date);
-  //     return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
-  //   })();
-
   const drawDate = new Date(data.draw_date);
 
-  // Check for duplicate
-  const isDuplicate = await checkDuplicateEntry(
-    data.state_id,
-    data.game_id,
-    drawDate,
-    data.draw_time
-  );
-
-  if (isDuplicate) {
-    throw new Error('A game history entry already exists for this state, game type, draw date, and draw time');
-  }
+  // Allow admin to create even if duplicate exists (removed duplicate check)
 
   // Convert prize_amount to Decimal
   const prizeAmount = data.prize_amount !== undefined
@@ -152,7 +135,8 @@ export const createGameHistory = async (data: CreateGameHistoryData) => {
       drawDate,
       drawTime: data.draw_time,
       winningNumbers: data.winning_numbers.trim(),
-      resultStatus: data.result || 'PENDING',
+      // COMMENTED OUT: Result Status flow - default to PENDING for backward compatibility
+      resultStatus: 'PENDING', // data.result || 'PENDING',
       totalWinners: 0,
       prizeAmount,
     },
@@ -236,31 +220,16 @@ export const updateGameHistory = async (id: number, data: UpdateGameHistoryData)
     updateData.winningNumbers = data.winning_numbers.trim();
   }
 
-  if (data.result !== undefined) {
-    updateData.resultStatus = data.result;
-  }
+  // COMMENTED OUT: Result Status flow
+  // if (data.result !== undefined) {
+  //   updateData.resultStatus = data.result;
+  // }
 
   if (data.prize_amount !== undefined) {
     updateData.prizeAmount = new Prisma.Decimal(data.prize_amount);
   }
 
-  // Check for duplicate if state_id, game_id, draw_date, or draw_time are being updated
-  const finalStateId = updateData.stateId || existingHistory.stateId;
-  const finalGameTypeId = updateData.gameTypeId || existingHistory.gameTypeId;
-  const finalDrawDate = updateData.drawDate || existingHistory.drawDate;
-  const finalDrawTime = updateData.drawTime || existingHistory.drawTime;
-
-  const isDuplicate = await checkDuplicateEntry(
-    finalStateId,
-    finalGameTypeId,
-    finalDrawDate,
-    finalDrawTime,
-    id
-  );
-
-  if (isDuplicate) {
-    throw new Error('A game history entry already exists for this state, game type, draw date, and draw time');
-  }
+  // Allow admin to update even if duplicate exists (removed duplicate check)
 
   // Update game history
   const updatedHistory = await prisma.gameHistory.update({
@@ -323,10 +292,11 @@ export const getGameHistories = async (filters: GameHistoryFilters, pagination: 
     ];
   }
 
+  // COMMENTED OUT: Result Status flow
   // Result filter
-  if (filters.result) {
-    where.resultStatus = filters.result;
-  }
+  // if (filters.result) {
+  //   where.resultStatus = filters.result;
+  // }
 
   // Date range filter
   if (filters.fromDate || filters.toDate) {
@@ -348,14 +318,16 @@ export const getGameHistories = async (filters: GameHistoryFilters, pagination: 
   // check if any filter is applied
   const hasAnyFilter =
     filters.search ||
-    filters.result ||
+    // COMMENTED OUT: Result Status flow
+    // filters.result ||
     filters.fromDate ||
     filters.toDate;
 
   if (filters.sortBy === 'drawDate') {
     orderBy.drawDate = filters.sortOrder || 'desc';
-  } else if (filters.sortBy === 'resultStatus') {
-    orderBy.resultStatus = filters.sortOrder || 'desc';
+  // COMMENTED OUT: Result Status flow
+  // } else if (filters.sortBy === 'resultStatus') {
+  //   orderBy.resultStatus = filters.sortOrder || 'desc';
   } else if (filters.sortBy === 'createdAt') {
     orderBy.createdAt = filters.sortOrder || 'desc';
   } else if (!hasAnyFilter) {
@@ -437,7 +409,7 @@ export const deleteGameHistory = async (id: number) => {
   // Check if game history exists
   const existingHistory = await prisma.gameHistory.findUnique({
     where: { id },
-    select: { id: true },
+    select: { id: true, stateId:true },
   });
 
   if (!existingHistory) {
@@ -449,6 +421,6 @@ export const deleteGameHistory = async (id: number) => {
     where: { id },
   });
 
-  return { success: true };
+  return { success: true,   stateId: existingHistory.stateId,};
 };
 

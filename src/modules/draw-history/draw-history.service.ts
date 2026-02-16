@@ -1,5 +1,6 @@
 import { Prisma } from '../../generated/prisma/client';
 import prisma from '../../config/prisma';
+import * as predictionService from '../../services/prediction.service';
 
 export interface DrawHistoryFilters {
   search?: string; // Search by winning number, draw date, or draw time
@@ -12,7 +13,7 @@ export interface DrawHistoryFilters {
 }
 
 // Format draw history response for public API
-const formatDrawHistoryResponse = (history: any) => {
+const formatDrawHistoryResponse = async (history: any) => {
   // Format date as YYYY-MM-DD in local timezone (not UTC)
   const drawDate = history.drawDate instanceof Date ? history.drawDate : new Date(history.drawDate);
   const year = drawDate.getFullYear();
@@ -20,13 +21,21 @@ const formatDrawHistoryResponse = (history: any) => {
   const day = String(drawDate.getDate()).padStart(2, '0');
   const formattedDate = `${year}-${month}-${day}`;
 
+  // Check if this draw matches a prediction (exact draw date and draw time)
+  const isPredicted = await predictionService.checkIfDrawMatchesPrediction(
+    history.stateId,
+    drawDate,
+    history.drawTime as 'MID' | 'EVE',
+    history.winningNumbers
+  );
+
   return {
     id: history.id,
     draw_date: formattedDate, // Format as YYYY-MM-DD in local timezone
     draw_time: history.drawTime, // Enum: 'MID' or 'EVE'
     winning_numbers: history.winningNumbers,
     prize_amount: history.prizeAmount?.toNumber() || 0,
-    total_winners: history.totalWinners,
+    is_predicted: isPredicted,
     state_name: history.state.name,
     state_code: history.state.code,
     game_name: history.gameType.name,
@@ -158,7 +167,12 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters) => {
     orderBy,
   });
 
+  // Format all draw histories and check predictions (in parallel for better performance)
+  const formattedHistories = await Promise.all(
+    drawHistories.map(history => formatDrawHistoryResponse(history))
+  );
+
   return {
-    draw_histories: drawHistories.map(formatDrawHistoryResponse),
+    draw_histories: formattedHistories,
   };
 };

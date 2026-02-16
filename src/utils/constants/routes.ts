@@ -47,6 +47,13 @@ export const API_ROUTES = {
   DRAW_HISTORY: {
     BASE: '/api/draw-history',
   },
+  PREDICTIONS: {
+    BASE: '/api/predictions',
+    LATEST: '/api/predictions/latest',
+  },
+  STATE_PERFORMANCE: {
+    BASE: '/api/state-performance',
+  },
   HEALTH: '/healthcheck',
   WEBHOOK: '/api/webhook'
 } as const;

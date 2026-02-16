@@ -14,11 +14,15 @@ export const requireActiveSubscription = async (
   next: NextFunction
 ): Promise<void> => {
   try {
+    const user = req.user;
     const userId = req.user?.id;
     
     if (!userId) {
       sendError(res, 'User not authenticated', HttpStatus.UNAUTHORIZED);
       return;
+    }
+    if (user?.role === 'ADMIN') {
+      return next();
     }
 
     const now = new Date();
