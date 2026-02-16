@@ -58,29 +58,74 @@ export class GoogleSheetsService {
 
   private initializeAuth() {
     try {
-      // Try multiple possible paths for credentials
-      const possiblePaths = [
-        path.join(process.cwd(), 'src', 'config', 'google-sheets-credentials.json'),
-        path.join(process.cwd(), 'config', 'google-sheets-credentials.json'),
-        path.join(__dirname, '..', 'config', 'google-sheets-credentials.json'),
-        process.env.GOOGLE_SHEETS_CREDENTIALS_PATH || '',
-      ].filter(Boolean);
+      let credentials: any;
 
-      let credentialsPath: string | null = null;
-      for (const possiblePath of possiblePaths) {
-        if (fs.existsSync(possiblePath)) {
-          credentialsPath = possiblePath;
-          break;
+      // Priority 1: Build credentials from environment variables (most secure)
+      if (
+        process.env.GOOGLE_SHEETS_PROJECT_ID &&
+        process.env.GOOGLE_SHEETS_PRIVATE_KEY &&
+        process.env.GOOGLE_SHEETS_CLIENT_EMAIL
+      ) {
+        // Replace escaped newlines in private key if present
+        const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n');
+
+        credentials = {
+          type: 'service_account',
+          project_id: process.env.GOOGLE_SHEETS_PROJECT_ID,
+          private_key_id: process.env.GOOGLE_SHEETS_PRIVATE_KEY_ID || '',
+          private_key: privateKey,
+          client_email: process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
+          client_id: process.env.GOOGLE_SHEETS_CLIENT_ID || '',
+          auth_uri: process.env.GOOGLE_SHEETS_AUTH_URI || 'https://accounts.google.com/o/oauth2/auth',
+          token_uri: process.env.GOOGLE_SHEETS_TOKEN_URI || 'https://oauth2.googleapis.com/token',
+          auth_provider_x509_cert_url:
+            process.env.GOOGLE_SHEETS_AUTH_PROVIDER_X509_CERT_URL ||
+            'https://www.googleapis.com/oauth2/v1/certs',
+          client_x509_cert_url: process.env.GOOGLE_SHEETS_CLIENT_X509_CERT_URL || '',
+          universe_domain: process.env.GOOGLE_SHEETS_UNIVERSE_DOMAIN || 'googleapis.com',
+        };
+      } else {
+        // Priority 2: Fallback to JSON file (for local development)
+        const possiblePaths = [
+          path.join(process.cwd(), 'src', 'config', 'google-sheets-credentials.json'),
+          path.join(process.cwd(), 'config', 'google-sheets-credentials.json'),
+          path.join(__dirname, '..', 'config', 'google-sheets-credentials.json'),
+          process.env.GOOGLE_SHEETS_CREDENTIALS_PATH || '',
+        ].filter(Boolean);
+
+        let credentialsPath: string | null = null;
+        for (const possiblePath of possiblePaths) {
+          if (fs.existsSync(possiblePath)) {
+            credentialsPath = possiblePath;
+            break;
+          }
+        }
+
+        if (!credentialsPath) {
+          throw new Error(
+            `Google Sheets credentials not found. Please set environment variables (GOOGLE_SHEETS_PROJECT_ID, GOOGLE_SHEETS_PRIVATE_KEY, GOOGLE_SHEETS_CLIENT_EMAIL) or provide a credentials file. Tried: ${possiblePaths.join(', ')}`
+          );
+        }
+
+        credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+
+        // Override with environment variables if they exist (allows partial overrides)
+        if (process.env.GOOGLE_SHEETS_PROJECT_ID) {
+          credentials.project_id = process.env.GOOGLE_SHEETS_PROJECT_ID;
+        }
+        if (process.env.GOOGLE_SHEETS_PRIVATE_KEY_ID) {
+          credentials.private_key_id = process.env.GOOGLE_SHEETS_PRIVATE_KEY_ID;
+        }
+        if (process.env.GOOGLE_SHEETS_PRIVATE_KEY) {
+          credentials.private_key = process.env.GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n');
+        }
+        if (process.env.GOOGLE_SHEETS_CLIENT_EMAIL) {
+          credentials.client_email = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+        }
+        if (process.env.GOOGLE_SHEETS_CLIENT_ID) {
+          credentials.client_id = process.env.GOOGLE_SHEETS_CLIENT_ID;
         }
       }
-
-      if (!credentialsPath) {
-        throw new Error(
-          `Google Sheets credentials not found. Tried: ${possiblePaths.join(', ')}`
-        );
-      }
-
-      const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
 
       this.auth = new google.auth.GoogleAuth({
         credentials,
