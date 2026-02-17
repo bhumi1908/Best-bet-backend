@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import prisma from '../../../config/prisma';
 import { sendSuccess, sendError } from '../../../utils/helpers/response';
 import { HttpStatus, UserRole } from '../../../utils/constants/enums';
+import { describe } from 'node:test';
+import { features } from 'process';
 
 // Get All Users
 export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
@@ -32,6 +34,7 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
         { firstName: { contains: search, mode: 'insensitive' } },
         { lastName: { contains: search, mode: 'insensitive' } },
         { phoneNo: { contains: search, mode: 'insensitive' } },
+        { state: { name: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
@@ -51,34 +54,41 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
           phoneNo: true,
           role: true,
           isInactive: true,
-          createdAt: true,
-          updatedAt: true,
-            subscriptions: {
-          where: {
-            isDeleted: false,
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-          take: 1,
-          select: {
-            id: true,
-            startDate: true,
-            endDate: true,
-            status: true,
-            createdAt: true,
-
-            plan: {
-              select: {
-                id: true,
-                name: true,
-                price: true,
-                duration: true,
-                isRecommended: true,
-              },
+          state: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
             },
           },
-        }
+          createdAt: true,
+          updatedAt: true,
+          subscriptions: {
+            where: {
+              isDeleted: false,
+            },
+            orderBy: {
+              createdAt: "desc",
+            },
+            take: 1,
+            select: {
+              id: true,
+              startDate: true,
+              endDate: true,
+              status: true,
+              createdAt: true,
+
+              plan: {
+                select: {
+                  id: true,
+                  name: true,
+                  price: true,
+                  duration: true,
+                  isRecommended: true,
+                },
+              },
+            },
+          }
         },
         skip,
         take: limit,
@@ -125,10 +135,18 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
   try {
     const userId = parseInt(req.params.id);
 
-    if (isNaN(userId)) {
-      sendError(res, 'Invalid user ID', HttpStatus.BAD_REQUEST);
+    const role = (req.user as any)?.role as UserRole | undefined;
+
+    if (!userId || isNaN(userId)) {
+      sendError(res, "Unauthorized access", HttpStatus.UNAUTHORIZED);
       return;
     }
+
+    if (!role || ![UserRole.ADMIN, UserRole.USER].includes(role)) {
+      sendError(res, "Unauthorized role", HttpStatus.FORBIDDEN);
+      return;
+    }
+
 
     // Get user by ID
     const user = await prisma.user.findUnique({
@@ -139,11 +157,20 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         firstName: true,
         lastName: true,
         phoneNo: true,
+        stateId: true,
+        state: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
+        isTrial: true,
         role: true,
         isInactive: true,
         createdAt: true,
         updatedAt: true,
-       subscriptions: {
+        subscriptions: {
           where: { isDeleted: false },
           orderBy: { createdAt: 'desc' },
           select: {
@@ -153,6 +180,9 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
             status: true,
             createdAt: true,
             updatedAt: true,
+            nextPlanId: true,
+            nextPlan: true,
+            scheduledChangeAt: true,
             plan: {
               select: {
                 id: true,
@@ -160,6 +190,14 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
                 price: true,
                 duration: true,
                 isRecommended: true,
+                description: true,
+                features: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true
+                  }
+                }
               },
             },
             payment: {
@@ -185,22 +223,30 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-     // Current active subscription (latest with status ACTIVE)
-    const activeSubscription = user.subscriptions.find(
-      (sub) => sub.status === 'ACTIVE'
-    ) || null;
+    // Current active subscription (latest with status ACTIVE)
+    const activeSubscription = user.subscriptions.find(sub =>
+      sub.status === 'ACTIVE' || sub.status === 'TRIAL'
+    );
 
     // Total payments
     const totalPaid = user.payments.reduce((acc, p) => acc + p.amount, 0);
 
+
+
     // Subscription age in days
     const subscriptionAge =
-      activeSubscription && activeSubscription.startDate
+      activeSubscription?.startDate && activeSubscription?.endDate
         ? Math.floor(
-            (new Date().getTime() - new Date(activeSubscription.startDate).getTime()) /
-              (1000 * 60 * 60 * 24)
-          )
+          (new Date(activeSubscription.endDate).getTime() -
+            new Date(activeSubscription.startDate).getTime()) /
+          (1000 * 60 * 60 * 24)
+        )
         : 0;
+
+    const isOnTrial =
+      activeSubscription?.status === 'TRIAL' &&
+      new Date(activeSubscription.endDate) > new Date();
+
 
     // Map subscriptions for response
     const allSubscriptions = user.subscriptions.map((sub) => ({
@@ -221,21 +267,34 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
       email: user.email,
       firstName: user.firstName,
       lastName: user.lastName,
+      isTrial: user.isTrial,
       phoneNo: user.phoneNo,
+      stateId: user.stateId,
+      state: user.state ? {
+        id: user.state.id,
+        name: user.state.name,
+        code: user.state.code,
+      } : null,
       role: user.role,
       isInactive: user.isInactive,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       currentSubscription: activeSubscription
         ? {
-            id: activeSubscription.id,
-            planName: activeSubscription.plan.name,
-            price: activeSubscription.plan.price,
-            startDate: activeSubscription.startDate,
-            endDate: activeSubscription.endDate,
-            status: activeSubscription.status,
-            paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
-          }
+          id: activeSubscription.id,
+          planName: activeSubscription.plan.name,
+          price: activeSubscription.plan.price,
+          startDate: activeSubscription.startDate,
+          endDate: activeSubscription.endDate,
+          description: activeSubscription.plan.description,
+          status: activeSubscription.status,
+          features: activeSubscription.plan.features,
+          isOnTrial,
+          paymentMethod: activeSubscription.payment?.paymentMethod || 'N/A',
+          nextPlanName: activeSubscription.nextPlan?.name,
+          scheduledChangeAt: activeSubscription.scheduledChangeAt,
+          isTrial: activeSubscription.status === 'TRIAL'
+        }
         : null,
       totalPayments: totalPaid,
       subscriptionAgeDays: subscriptionAge,
@@ -276,7 +335,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 export const updateUser = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = parseInt(req.params.id);
-    const { firstName, lastName, phoneNo, role, isInactive } = req.body;
+    const { firstName, lastName, phoneNo, stateId, role, isInactive } = req.body;
     const currentUserId = req.user?.id;
 
     if (isNaN(userId)) {
@@ -323,11 +382,30 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
       }
     }
 
+    // Validate state if stateId is being updated
+    if (stateId !== undefined && stateId !== null) {
+      const state = await prisma.state.findUnique({
+        where: { id: stateId },
+        select: { id: true, isActive: true, isDeleted: true },
+      });
+
+      if (!state) {
+        sendError(res, 'Invalid state selected', HttpStatus.BAD_REQUEST);
+        return;
+      }
+
+      if (state.isDeleted || !state.isActive) {
+        sendError(res, 'Selected state is not available', HttpStatus.BAD_REQUEST);
+        return;
+      }
+    }
+
     // Build update data
     const updateData: any = {};
     if (firstName !== undefined) updateData.firstName = firstName;
     if (lastName !== undefined) updateData.lastName = lastName;
     if (phoneNo !== undefined) updateData.phoneNo = phoneNo;
+    if (stateId !== undefined) updateData.stateId = stateId;
     if (role !== undefined) updateData.role = role;
     if (isInactive !== undefined) updateData.isInactive = isInactive;
 
@@ -357,6 +435,14 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
         firstName: true,
         lastName: true,
         phoneNo: true,
+        stateId: true,
+        state: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
         role: true,
         isInactive: true,
         createdAt: true,

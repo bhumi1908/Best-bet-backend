@@ -17,7 +17,7 @@ export const API_ROUTES = {
     CREATE: '/api/support/create',
   },
   PROFILE: {
-    ADMINBASE: '/api/admin/profile'
+    ADMINBASE: '/api/profile'
   },
   SUBSCRIPTIONPLAN:{
     ADMINBASE: '/api/admin/subscription-plan',
@@ -34,7 +34,27 @@ export const API_ROUTES = {
   STRIPE: {
     BASE: '/api/stripe'
   },
+  STATES: {
+    BASE: '/api/states',
+  },
+  GAME_TYPES: {
+    BASE: '/api/game-types',
+  },
+  GAME_HISTORY: {
+    BASE: '/api/game-history',
+    HISTORIES: '/api/game-histories'
+  },
+  DRAW_HISTORY: {
+    BASE: '/api/draw-history',
+  },
+  PREDICTIONS: {
+    BASE: '/api/predictions',
+    LATEST: '/api/predictions/latest',
+  },
+  STATE_PERFORMANCE: {
+    BASE: '/api/state-performance',
+  },
   HEALTH: '/healthcheck',
-  WEBHOOK: '/webhook'
+  WEBHOOK: '/api/webhook'
 } as const;
 

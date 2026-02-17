@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -8,6 +5,226 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+model User {
+  id                  Int                @id @default(autoincrement())
+  email               String             @unique
+  passwordHash        String             @map("password_hash")
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  refreshToken        String?            @map("refresh_token")
+  forgotHashExpiresAt DateTime?          @db.Timestamptz(6)
+  forgotHashKey       String?            @unique
+  role                Role               @default(USER)
+  firstName           String?            @map("first_name")
+  lastName            String?            @map("last_name")
+  isInactive          Boolean            @default(false) @map("is_inactive")
+  phoneNo             String?            @unique @map("phone_no")
+  stripeCustomerId    String?            @unique @map("stripe_customer_id")
+  isTrial             Boolean            @default(false)
+  stateId             Int?               @map("state_id")
+  payments            Payment[]
+  refunds             Refund[]
+  uploads             Upload[]
+  subscriptions       UserSubscription[]
+  state               State?             @relation(fields: [stateId], references: [id])
+
+  @@map("users")
+}
+
+model Upload {
+  id                  Int      @id @default(autoincrement())
+  userId              Int      @map("user_id")
+  cloudinaryPublicId  String   @map("cloudinary_public_id")
+  cloudinaryUrl       String   @map("cloudinary_url")
+  cloudinarySecureUrl String   @map("cloudinary_secure_url")
+  resourceType        String?  @map("resource_type")
+  format              String?
+  width               Int?
+  height              Int?
+  bytes               Int?
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("uploads")
+}
+
+model Support {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  subject   String
+  category  String
+  priority  String
+  message   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("supports")
+}
+
+model SubscriptionPlan {
+  price                  Float?
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt              DateTime?          @db.Timestamptz(6)
+  description            String?
+  duration               Int?
+  isDeleted              Boolean            @default(false)
+  isRecommended          Boolean            @default(false)
+  name                   String             @unique
+  id                     Int                @id @default(autoincrement())
+  isActive               Boolean            @default(true) @map("is_active")
+  stripePriceId          String?            @unique
+  stripeProductId        String?            @unique
+  trialDays              Int?
+  discountPercent        Float?             @default(0)
+  features               Feature[]
+  scheduledSubscriptions UserSubscription[] @relation("NextPlan")
+  subscriptions          UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model Feature {
+  name        String
+  description String?
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted   Boolean          @default(false)
+  deletedAt   DateTime?        @db.Timestamptz(6)
+  id          Int              @id @default(autoincrement())
+  planId      Int
+  plan        SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("features")
+}
+
+model UserSubscription {
+  id                   Int                @id @default(autoincrement())
+  startDate            DateTime           @map("start_date") @db.Timestamptz(6)
+  endDate              DateTime           @map("end_date") @db.Timestamptz(6)
+  stripeSubscriptionId String?            @unique
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted            Boolean            @default(false)
+  deletedAt            DateTime?          @db.Timestamptz(6)
+  paymentId            Int?
+  planId               Int
+  userId               Int
+  status               SubscriptionStatus @default(ACTIVE)
+  nextPlanId           Int?
+  scheduledChangeAt    DateTime?          @db.Timestamptz(6)
+  nextPlan             SubscriptionPlan?  @relation("NextPlan", fields: [nextPlanId], references: [id])
+  payment              Payment?           @relation(fields: [paymentId], references: [id])
+  plan                 SubscriptionPlan   @relation(fields: [planId], references: [id])
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_subscriptions")
+}
+
+model Payment {
+  amount          Float
+  status          PaymentStatus
+  stripePaymentId String             @unique
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted       Boolean            @default(false)
+  deletedAt       DateTime?          @db.Timestamptz(6)
+  id              Int                @id @default(autoincrement())
+  userId          Int
+  paymentMethod   String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refund          Refund?
+  subscription    UserSubscription[]
+
+  @@map("payments")
+}
+
+model Refund {
+  amount         Float
+  status         RefundStatus
+  stripeRefundId String       @unique
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted      Boolean      @default(false)
+  deletedAt      DateTime?    @db.Timestamptz(6)
+  id             Int          @id @default(autoincrement())
+  paymentId      Int          @unique
+  userId         Int
+  payment        Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refunds")
+}
+
+model State {
+  id          Int           @id @default(autoincrement())
+  name        String        @unique
+  code        String?       @unique
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted   Boolean       @default(false)
+  deletedAt   DateTime?     @db.Timestamptz(6)
+  gameHistory GameHistory[]
+  predictions Prediction[]
+  users       User[]
+
+  @@map("states")
+}
+
+model GameType {
+  id          Int           @id @default(autoincrement())
+  name        String        @unique
+  code        String?       @unique
+  description String?
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted   Boolean       @default(false)
+  deletedAt   DateTime?     @db.Timestamptz(6)
+  gameHistory GameHistory[]
+
+  @@map("game_types")
+}
+
+model GameHistory {
+  id             Int              @id @default(autoincrement())
+  stateId        Int              @map("state_id")
+  gameTypeId     Int              @map("game_type_id")
+  drawDate       DateTime         @map("draw_date") @db.Timestamptz(6)
+  drawTime       DrawTime         @map("draw_time")
+  winningNumbers String           @map("winning_numbers")
+  resultStatus   GameResultStatus @default(WIN) @map("result_status")
+  totalWinners   Int              @default(0) @map("total_winners")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  prizeAmount    Decimal?         @map("prize_amount") @db.Decimal(10, 2)
+  gameType       GameType         @relation(fields: [gameTypeId], references: [id])
+  state          State            @relation(fields: [stateId], references: [id])
+
+  @@index([stateId, gameTypeId])
+  @@index([drawDate])
+  @@index([resultStatus])
+  @@map("game_history")
+}
+
+model Prediction {
+  id          Int       @id @default(autoincrement())
+  date         DateTime  @default(now()) @db.Timestamptz(6)
+  gameId       Int       @map("game_id")
+  stateId      Int       @map("state_id")
+  drawTime     DrawTime? @map("draw_time")
+  predictions  String
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  state        State     @relation(fields: [stateId], references: [id])
+
+  @@index([stateId, gameId])
+  @@index([stateId, date, drawTime])
+  @@map("predictions")
 }
 
 enum Role {
@@ -29,174 +246,21 @@ enum RefundStatus {
 }
 
 enum SubscriptionStatus {
-  ACTIVE  
-  EXPIRED 
-  CANCELED 
+  ACTIVE
+  EXPIRED
+  CANCELED
   REFUNDED
+  TRIAL
+  PAST_DUE
 }
 
-model User {
-  id           Int       @id @default(autoincrement())
-  firstName     String? @map("first_name")
-  lastName     String? @map("last_name")
-  email        String    @unique
-    phoneNo      String?   @unique @map("phone_no")
-  passwordHash String    @map("password_hash")
-  role         Role    @default(USER)
-  refreshToken String?   @map("refresh_token")
-    stripeCustomerId       String?   @unique @map("stripe_customer_id")
-    
-  isInactive    Boolean   @default(false) @map("is_inactive")
-  forgotHashKey      String?   @unique
-  forgotHashExpiresAt DateTime?
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-
-   uploads               Upload[]
-  subscriptions         UserSubscription[]
-  payments              Payment[]
-  refunds               Refund[]
-  
-
-  @@map("users")
+enum DrawTime {
+  MID
+  EVE
 }
 
-model Upload {
-  id                  Int       @id @default(autoincrement())
-  userId              Int       @map("user_id")
-  cloudinaryPublicId  String    @map("cloudinary_public_id")
-  cloudinaryUrl       String    @map("cloudinary_url")
-  cloudinarySecureUrl String    @map("cloudinary_secure_url")
-  resourceType        String?   @map("resource_type")
-  format              String?
-  width               Int?
-  height              Int?
-  bytes               Int?
-  createdAt           DateTime  @default(now()) @map("created_at")
-  
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("uploads")
-}
-
-model Support {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String
-  subject   String
-  category  String
-  priority  String
-  message   String
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-    @@map("supports")
-}
-
-model SubscriptionPlan {
-  id            Int       @id @default(autoincrement()) 
-  name          String    @unique
-  price         Float
-  duration      Int     // Month
-
-  description   String?
-  isRecommended Boolean   @default(false)
-  isActive      Boolean   @default(true) @map("is_active")
-
-  stripeProductId    String?   @unique
-  stripePriceId      String?   @unique
-
-  features      Feature[]
-  subscriptions UserSubscription[]
-
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-   isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
-
-  @@map("subscription_plans")
-}
-
-model Feature {
-  id        Int       @id @default(autoincrement()) 
-  planId    Int      
-  name      String
-  description String?
-
-  plan      SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-   isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
-
-  @@map("features")
-}
-
-model UserSubscription {
-  id                     Int      @id @default(autoincrement())
-  userId                 Int     
-  planId                 Int     
-  startDate              DateTime @map("start_date")
-  endDate                DateTime @map("end_date")
-  stripeSubscriptionId   String?   @unique
-  paymentId              Int?    
-
-  status                 SubscriptionStatus @default(ACTIVE) 
-
-  user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan                   SubscriptionPlan @relation(fields: [planId], references: [id])
-  payment                Payment?         @relation(fields: [paymentId], references: [id])
-
-    createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-   isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
-
-  @@map("user_subscriptions")
-}
-
-model Payment {
-  id               Int           @id @default(autoincrement())
-  userId           Int          
-  amount           Float
-  status           PaymentStatus
-  paymentMethod    String
-  stripePaymentId  String        @unique
-
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscription     UserSubscription[]
-  refund           Refund?
-
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-   isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
-
-  @@map("payments")
-}
-
-model Refund {
-  id              Int           @id @default(autoincrement()) 
-  paymentId       Int           @unique 
-  userId          Int           
-  amount          Float
-  status          RefundStatus
-  stripeRefundId  String        @unique
-
-  payment         Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-    createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-   isDeleted     Boolean   @default(false)
-  deletedAt     DateTime?
-
-  @@map("refunds")
+enum GameResultStatus {
+  WIN
+  LOSS
+  PENDING
 }

@@ -16,6 +16,9 @@ export const getAllPlans = async (req: Request, res: Response) => {
                 description: true,
                 isRecommended: true,
                 isActive: true,
+                discountPercent:true,
+                 trialDays: true,
+                 stripePriceId: true,
                 features: {
                     where: { isDeleted: false },
                     select: {
@@ -25,7 +28,7 @@ export const getAllPlans = async (req: Request, res: Response) => {
                     },
                 },
             },
-            orderBy: { price: "asc" },
+            orderBy: { price: "desc" },
         });
 
         sendSuccess(res, { plans }, "Subscription plans fetched successfully", HttpStatus.OK);

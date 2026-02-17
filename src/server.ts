@@ -12,7 +12,18 @@ import subscriptionPlanRoutes from './modules/subscription-plans/subscription-pl
 import subscriptionPlanAdminRoutes from './modules/admin/subscription-plans/subscription-plan.routes';
 import subscriptionRoutes from './modules/subscription/subscription.routes'
 import stripeRoutes from './modules/stripe/stripe.routes'
+import webhookRoutes from './webhook/webhook.routes'
+import { gameHistoryRouter, gameHistoriesRouter } from './modules/game-history/game-history.routes'
+import statesRoutes from './modules/states/states.routes'
+import gameTypesRoutes from './modules/game-types/game-types.routes'
+import drawHistoryRoutes from './modules/draw-history/draw-history.routes'
+import predictionsRoutes from './modules/predictions/predictions.routes'
+import statePerformanceRoutes from './modules/state-performance/state-performance.routes'
 import { API_ROUTES } from './utils/constants/routes';
+import { initializeGameHistorySyncScheduler } from './cron/game-history-sync.scheduler';
+import { initializeSubscriptionExpireScheduler } from './cron/subscription-expire.scheduler';
+import { getGameHistorySyncWorker } from './queue/game-history-sync';
+import { getPredictionWorker } from './queue/prediction';
 
 // Load environment variables
 dotenv.config();
@@ -38,11 +49,12 @@ const corsOptions: CorsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(API_ROUTES.WEBHOOK, express.raw({ type: "application/json" }),webhookRoutes);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
-app.use(rateLimiter);
+// app.use(rateLimiter);
 app.use(cookieParser());
 // API Routes
 app.use(API_ROUTES.AUTH.BASE, authRoutes);
@@ -53,7 +65,14 @@ app.use(API_ROUTES.SUBSCRIPTIONPLAN.BASE, subscriptionPlanRoutes);
 app.use(API_ROUTES.SUBSCRIPTIONPLAN.ADMINBASE, subscriptionPlanAdminRoutes);
 app.use(API_ROUTES.SUBSCRIPTION.BASE, subscriptionRoutes);
 app.use(API_ROUTES.STRIPE.BASE, stripeRoutes);
-// app.use(API_ROUTES.WEBHOOK, webhookRoutes);
+app.use(API_ROUTES.STATES.BASE, statesRoutes);
+app.use(API_ROUTES.GAME_TYPES.BASE, gameTypesRoutes);
+app.use(API_ROUTES.GAME_HISTORY.BASE, gameHistoryRouter);
+app.use(API_ROUTES.GAME_HISTORY.HISTORIES, gameHistoriesRouter);
+app.use(API_ROUTES.DRAW_HISTORY.BASE, drawHistoryRoutes);
+app.use(API_ROUTES.PREDICTIONS.BASE, predictionsRoutes);
+app.use(API_ROUTES.STATE_PERFORMANCE.BASE, statePerformanceRoutes);
+
 
 // 404 handler
 app.use((req, res) => {
@@ -70,10 +89,43 @@ app.use(errorHandler);
 const startServer = () => {
   console.log('Database connected successfully');
 
+  // Initialize schedulers
+  initializeSubscriptionExpireScheduler();
+  initializeGameHistorySyncScheduler();
+
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
 };
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM signal received: closing HTTP server and workers');
+  const gameHistoryWorker = getGameHistorySyncWorker();
+  const predictionWorker = getPredictionWorker();
+  
+  if (gameHistoryWorker) {
+    await gameHistoryWorker.close();
+  }
+  if (predictionWorker) {
+    await predictionWorker.close();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT signal received: closing HTTP server and workers');
+  const gameHistoryWorker = getGameHistorySyncWorker();
+  const predictionWorker = getPredictionWorker();
+  
+  if (gameHistoryWorker) {
+    await gameHistoryWorker.close();
+  }
+  if (predictionWorker) {
+    await predictionWorker.close();
+  }
+  process.exit(0);
+});
 
 startServer();
 

@@ -19,7 +19,7 @@ router.get(
 router.get(
   '/:id',
   authenticateToken,
-  requireAdmin,
+  // requireAdmin,
   getUserById
 );
 

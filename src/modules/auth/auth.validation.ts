@@ -29,6 +29,12 @@ export const registerSchema = Joi.object({
     'string.pattern.base': 'Please provide a valid phone number',
     'any.required': 'Phone number is required',
   }),
+  stateId: Joi.number().integer().positive().required().messages({
+    'number.base': 'State is required',
+    'number.integer': 'State ID must be an integer',
+    'number.positive': 'State ID must be positive',
+    'any.required': 'State is required',
+  }),
   role: Joi.string()
     .valid("USER", "ADMIN")
     .optional()

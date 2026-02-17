@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticateToken } from "../../middleware/auth";
 import { authRateLimiter } from "../../middleware/rateLimiter";
 import { requireAdmin } from "../../middleware/adminAuth";
-import { changeUserSubscriptionPlan, getAllSubscribedUsersAdmin, getSubscriptionDashboardAdmin, getSubscriptionDetailsAdmin, refundSubscriptionPaymentAdmin, revokeUserSubscriptionAdmin } from "./subscription.controller";
+import { cancelScheduledPlanChange, changeUserSubscriptionPlan, changeUserSubscriptionPlanSelf, createCheckoutSession, getAllSubscribedUsersAdmin, getSubscriptionDashboardAdmin, getSubscriptionDetailsAdmin, getUserSubscription, refundSubscriptionPaymentAdmin, revokeUserSubscriptionAdmin, revokeUserSubscriptionSelf } from "./subscription.controller";
 
 const router = Router();
 
@@ -12,10 +12,31 @@ const router = Router();
  * User clicks "Subscribe"
  */
 router.post(
-    "/checkout",
-    authRateLimiter,
-    // createCheckoutSession
+  "/checkout",
+  authRateLimiter,
+  authenticateToken,
+  createCheckoutSession
 );
+
+/**
+ * Get current user's subscription details
+ */
+router.get("/me", authenticateToken, getUserSubscription);
+
+// Cancel subscription (at period end)
+router.post("/me/revoke", authenticateToken, revokeUserSubscriptionSelf);
+
+// Change plan
+router.post("/me/change-plan", authenticateToken, changeUserSubscriptionPlanSelf);
+
+// Cancel schedule plan
+router.post("/me/cancel/schedule-plan", authenticateToken, cancelScheduledPlanChange);
+
+/**
+ * ===========================
+ * ADMIN-FACING ROUTES
+ * ===========================
+ */
 
 router.get(
   "/dashboard",
@@ -42,13 +63,6 @@ router.get(
   getSubscriptionDetailsAdmin
 );
 
-router.post(
-  "/users/:userId/revoke",
-  authenticateToken,
-  requireAdmin,
-  authRateLimiter,
-//   revokeUserSubscriptionAdmin
-);
 
 router.post(
   "/users/:userId/revoke",

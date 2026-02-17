@@ -37,5 +37,7 @@ coverage/
 tmp/
 temp/
 
+# Google Sheets credentials (contains sensitive data)
+src/config/google-sheets-credentials.json
 
 /src/generated/prisma
