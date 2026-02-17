@@ -20,10 +20,9 @@ import drawHistoryRoutes from './modules/draw-history/draw-history.routes'
 import predictionsRoutes from './modules/predictions/predictions.routes'
 import statePerformanceRoutes from './modules/state-performance/state-performance.routes'
 import { API_ROUTES } from './utils/constants/routes';
-import { initializeGameHistorySyncScheduler } from './cron/game-history-sync.scheduler';
-import { initializeSubscriptionExpireScheduler } from './cron/subscription-expire.scheduler';
 import { getGameHistorySyncWorker } from './queue/game-history-sync';
 import { getPredictionWorker } from './queue/prediction';
+import { initializeLocalCronJobs } from './cron-jobs/local-scheduler';
 
 // Load environment variables
 dotenv.config();
@@ -89,9 +88,9 @@ app.use(errorHandler);
 const startServer = () => {
   console.log('Database connected successfully');
 
-  // Initialize schedulers
-  initializeSubscriptionExpireScheduler();
-  initializeGameHistorySyncScheduler();
+  // Initialize local cron jobs (only if ENABLE_LOCAL_CRON_JOBS=true)
+  // In production on Render, use standalone cron job files instead
+  initializeLocalCronJobs();
 
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

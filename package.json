@@ -19,7 +19,11 @@
     "seed": "ts-node prisma/seed.ts",
     "seed:game-history": "ts-node prisma/seed.ts --game-history-only",
     "seed:all": "ts-node prisma/seed.ts --with-game-history",
-    "clear:game-history": "ts-node prisma/seed.ts --clear-game-history"
+    "clear:game-history": "ts-node prisma/seed.ts --clear-game-history",
+    "cron:expire-subscriptions": "node dist/cron-jobs/expire-subscriptions.js",
+    "cron:cleanup-canceled": "node dist/cron-jobs/cleanup-canceled-subscriptions.js",
+    "cron:plan-changes": "node dist/cron-jobs/process-scheduled-plan-changes.js",
+    "cron:game-history": "node dist/cron-jobs/game-history-sync.js"
   },
   "keywords": [
     "express",
