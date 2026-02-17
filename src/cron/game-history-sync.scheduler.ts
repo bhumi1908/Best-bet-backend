@@ -75,9 +75,11 @@ export async function scheduleGameHistorySync(): Promise<void> {
  */
 export function initializeGameHistorySyncScheduler(): void {
  // Every 8 hours cronSchedule run
-  const cronSchedule =  '0 */8 * * *' 
+  // const cronSchedule =  '0 */8 * * *' 
   // Every 30 seconds cronSchedule run
-  // const cronSchedule =  '*/30 * * * * *'
+  const cronSchedule =  '*/30 * * * * *'
+  console.log('Cron schedule: Every 30 seconds');
+  console.log('Cron schedule:', cronSchedule);
   cron.schedule(cronSchedule, async () => {
     await scheduleGameHistorySync();
   });
