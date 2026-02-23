@@ -314,7 +314,8 @@ export const getGameHistories = async (filters: GameHistoryFilters, pagination: 
   }
 
   // Build orderBy clause
-  const orderBy: any = {};
+  // For same date, EVE should appear before MID (EVE > MID alphabetically, so desc order puts EVE first)
+  let orderBy: any[] = [];
   // check if any filter is applied
   const hasAnyFilter =
     filters.search ||
@@ -324,18 +325,33 @@ export const getGameHistories = async (filters: GameHistoryFilters, pagination: 
     filters.toDate;
 
   if (filters.sortBy === 'drawDate') {
-    orderBy.drawDate = filters.sortOrder || 'desc';
+    const sortOrder = filters.sortOrder || 'desc';
+    orderBy = [
+      { drawDate: sortOrder },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   // COMMENTED OUT: Result Status flow
   // } else if (filters.sortBy === 'resultStatus') {
   //   orderBy.resultStatus = filters.sortOrder || 'desc';
   } else if (filters.sortBy === 'createdAt') {
-    orderBy.createdAt = filters.sortOrder || 'desc';
+    orderBy = [
+      { createdAt: filters.sortOrder || 'desc' },
+      { drawDate: 'desc' },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   } else if (!hasAnyFilter) {
-    orderBy.createdAt = 'desc';
+    orderBy = [
+      { createdAt: 'desc' },
+      { drawDate: 'desc' },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   }
   else {
-    // Default to drawDate desc
-    orderBy.drawDate = 'desc';
+    // Default to drawDate desc, then drawTime desc (EVE before MID)
+    orderBy = [
+      { drawDate: 'desc' },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   }
 
 

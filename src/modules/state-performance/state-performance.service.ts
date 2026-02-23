@@ -451,6 +451,7 @@ export async function getStatePerformance(
   }
 
   // Fetch game history for the state
+  // For same date, EVE should appear before MID (EVE > MID alphabetically, so desc order puts EVE first)
   const gameHistories = await prisma.gameHistory.findMany({
     where: gameHistoryWhere,
     select: {
@@ -459,9 +460,10 @@ export async function getStatePerformance(
       drawTime: true,
       gameTypeId: true,
     },
-    orderBy: {
-      drawDate: 'asc',
-    },
+    orderBy: [
+      { drawDate: 'asc' },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ],
   });
 
   if (gameHistories.length === 0) {

@@ -53,9 +53,14 @@ export class PredictionSheetsService {
     const tempResultSheetName = `temp_result_${stateName}_${timestamp}`;
 
     // Get all game history for this state
+    // Ordering: drawDate desc (newest first), then drawTime desc (EVE before MID for same date)
+    // This ensures that for the same date, EVE appears before MID in the data
     const gameHistory = await prisma.gameHistory.findMany({
       where: { stateId },
-      orderBy: [{ drawDate: 'desc' }, { drawTime: 'desc' }],
+      orderBy: [
+        { drawDate: 'desc' }, // Newest dates first
+        { drawTime: 'desc' }   // EVE before MID for same date (EVE > MID alphabetically)
+      ],
       select: { drawDate: true, winningNumbers: true, drawTime: true },
     });
 
@@ -167,6 +172,7 @@ export class PredictionSheetsService {
 
   /**
    * Write game history data to a sheet
+   * Data is written in the exact order received (preserves EVE-before-MID ordering for same dates)
    */
   private async writeGameHistoryData(
     sheetName: string,
@@ -183,6 +189,8 @@ export class PredictionSheetsService {
     }
 
     // Prepare data rows
+    // Note: gameHistoryRows are already ordered correctly (EVE before MID for same date)
+    // We write them in the exact order received to maintain this ordering in Google Sheets
     const values: any[][] = [];
 
     for (const row of gameHistoryRows) {
