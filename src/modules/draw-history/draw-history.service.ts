@@ -135,14 +135,26 @@ export const getPublicDrawHistories = async (filters: DrawHistoryFilters) => {
   }
 
   // Build orderBy clause
-  const orderBy: any = {};
+  // For same date, EVE should appear before MID (EVE > MID alphabetically, so desc order puts EVE first)
+  let orderBy: any[] = [];
   if (filters.sortBy === 'drawDate') {
-    orderBy.drawDate = filters.sortOrder || 'desc';
+    const sortOrder = filters.sortOrder || 'desc';
+    orderBy = [
+      { drawDate: sortOrder },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   } else if (filters.sortBy === 'winningNumbers') {
-    orderBy.winningNumbers = filters.sortOrder || 'asc';
+    orderBy = [
+      { winningNumbers: filters.sortOrder || 'asc' },
+      { drawDate: 'desc' },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   } else {
-    // Default to drawDate desc
-    orderBy.drawDate = 'desc';
+    // Default to drawDate desc, then drawTime desc (EVE before MID)
+    orderBy = [
+      { drawDate: 'desc' },
+      { drawTime: 'desc' } // desc puts EVE before MID for same date
+    ];
   }
 
   // Get all draw histories (no pagination)
